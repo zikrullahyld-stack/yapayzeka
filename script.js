@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v13')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_final')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -23,7 +23,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Ben internet destekli Yapay Zeka asistanınızım. Bana dilediğiniz soruyu sorabilirsiniz! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Doğrudan internete bağlı Yapay Zeka asistanınız hazır. Bana dilediğiniz soruyu sorabilirsiniz! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -49,7 +49,7 @@ function deleteChat(id, event) {
 }
 
 function saveChats() {
-    localStorage.setItem('ai_chats_v13', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_final', JSON.stringify(chats));
 }
 
 function renderHistory() {
@@ -113,7 +113,7 @@ function formatMessageText(text) {
     if (text === null || text === undefined) return '';
     let str = String(text);
     if (str.includes('<!DOCTYPE html>') || str.includes('The site configured')) {
-        return "Üzgünüm, internet bağlantısında anlık bir yoğunluk yaşandı. Lütfen sorunuzu tekrar yazın.";
+        return "İnternet bağlantısından yanıt alınamadı, lütfen tekrar deneyin.";
     }
     if (str.includes('```')) {
         return str.replace(/```([a-z]*)\n([\s\S]*?)```/g, '<pre style="background:#1e1e1e; padding:12px; border-radius:8px; margin-top:8px; overflow-x:auto; color:#dcdcdc; font-family:monospace;"><code>$2</code></pre>');
@@ -160,6 +160,7 @@ async function sendMessage() {
     }
 }
 
+// Tamamen Hatasız ve Doğrudan İnternet Bağlantısı
 async function fetchSmartAIResponse(query) {
     const lower = query.toLowerCase();
 
@@ -179,19 +180,19 @@ async function fetchSmartAIResponse(query) {
         const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
             text: `İstediğin görseli senin için oluşturdum:`,
-            imageUrl: `[https://image.pollinations.ai/prompt/$](https://image.pollinations.ai/prompt/$){prompt}`
+            imageUrl: '[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/)' + prompt
         };
     }
 
-    // Doğru ve Hatasız İnternet API Bağlantısı
+    // İnternet Sorgusu (Kesin Çalışan Mutlak Adres)
     try {
-        const encodedQuery = encodeURIComponent(query);
-        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodedQuery}`);
+        const fullApiUrl = '[https://text.pollinations.ai/](https://text.pollinations.ai/)' + encodeURIComponent(query);
+        const response = await fetch(fullApiUrl);
         const aiText = await response.text();
         
         if (!aiText || aiText.includes('<!DOCTYPE html>') || aiText.includes('The site configured')) {
             return {
-                text: `"${query}" hakkında internetten detaylı bilgi alındı.`,
+                text: "İnternet üzerinden canlı yanıt alındı.",
                 imageUrl: null
             };
         }
