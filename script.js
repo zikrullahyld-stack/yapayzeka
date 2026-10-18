@@ -109,8 +109,8 @@ const isImage = q => q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
 
 // "Seni kim yaptı" gibi sorular doğrudan cevaplanır
-const WHO_MADE = /(seni|sizi).{0,20}(kim|kimin).{0,20}(yaptı|yapmış|geliştir|oluştur|kodla|tasarla|üret|yazdı)|kim(in)? tarafından.{0,20}(yapıl|geliştiril|oluşturul|tasarlan)|(yaratıcın|geliştiricin|yapımcın|yapımcınız|sahibin) kim|hangi şirket.{0,20}(yaptı|geliştir)|(kim yaptı|kim geliştirdi) seni/i;
-const isWhoMade = q => WHO_MADE.test(q);
+const WHO_MADE = /(seni|sizi).{0,20}(kim|kimin).{0,20}(yaptı|yapmış|geliştir|oluştur|kodla|tasarla|üret|yazdı)|kim(in)? tarafından.{0,20}(yapıl|geliştiril|oluşturul|tasarlan)|(yaratıcın|geliştiricin|yapımcın|yapımcınız|sahibin) kim|hangi şirket.{0,20}(yaptı|geliştir)|(kim yaptı|kim geliştirdi) seni|kim yaptı|kim geliştirdi/i;
+const isWhoMade = q => WHO_MADE.test(q) && !isImage(q) && q.length < 80;
 
 function topicOf(q) {
   const t = q
@@ -191,7 +191,10 @@ async function ask(q) {
         system += ' Kullanıcı bir konuyu araştırmanı istedi ama Vikipedi\'de sonuç bulunamadı. Bunu kısaca söyle ve kendi bilginle kısa bir cevap ver.';
       }
       bot.text = 'Cevap yazılıyor…'; renderMsgs();
-      const answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
+      let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
+      if (!/open\s?ai|chat\s?gpt|gpt/i.test(q)) {
+        answer = answer.replace(/open\s?ai|chat\s?gpt/gi, 'Zikrullah');
+      }
       const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
         .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
       bot.text = answer;
@@ -228,3 +231,4 @@ $('#save').onclick = () => {
 
 currentId = chats[0]?.id ?? null;
 render();
+document.title = 'Cam AI v3';
