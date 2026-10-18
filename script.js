@@ -1,4 +1,11 @@
-let chats = JSON.parse(localStorage.getItem('ai_chats')) || [];
+let chats = [];
+try {
+    chats = JSON.parse(localStorage.getItem('ai_chats')) || [];
+    if (!Array.isArray(chats)) chats = [];
+} catch (e) {
+    chats = [];
+}
+
 let currentChatId = null;
 
 // Sayfa yüklendiğinde çalışacak fonksiyon
@@ -35,11 +42,12 @@ function saveChats() {
 // Geçmiş Sohbetleri Ekrana Listeleme
 function renderHistory() {
     const historyContainer = document.getElementById('chatHistory');
+    if (!historyContainer) return;
     historyContainer.innerHTML = '';
     chats.forEach(chat => {
         const div = document.createElement('div');
         div.className = `history-item ${chat.id === currentChatId ? 'active' : ''}`;
-        div.textContent = chat.title;
+        div.textContent = chat.title || 'Sohbet';
         div.onclick = () => loadChat(chat.id);
         historyContainer.appendChild(div);
     });
@@ -55,6 +63,7 @@ function loadChat(id) {
 // Mesajları Ekrana Yazdırma
 function renderMessages() {
     const chatMessages = document.getElementById('chatMessages');
+    if (!chatMessages) return;
     chatMessages.innerHTML = '';
     const currentChat = chats.find(c => c.id === currentChatId);
     if (!currentChat) return;
@@ -82,8 +91,11 @@ function renderMessages() {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// Kod Bloklarını Biçimlendirme
+// Güvenli Metin ve Kod Biçimlendirme
 function formatMessageText(text) {
+    if (typeof text !== 'string') {
+        text = String(text || '');
+    }
     if (text.includes('```')) {
         return text.replace(/```([a-z]*)\n([\s\S]*?)```/g, '<pre style="background:#1e1e1e; padding:12px; border-radius:8px; margin-top:8px; overflow-x:auto; color:#dcdcdc; font-family:monospace;"><code>$2</code></pre>');
     }
@@ -101,6 +113,7 @@ function handleKeyDown(event) {
 // Mesaj Gönderme Fonksiyonu
 function sendMessage() {
     const input = document.getElementById('userInput');
+    if (!input) return;
     const text = input.value.trim();
     if (!text) return;
 
@@ -134,7 +147,7 @@ function sendMessage() {
     }, 600);
 }
 
-// Yapay Zeka Cevap Motoru (Resim ve Kod Üretici)
+// Yapay Zeka Cevap Motoru
 function generateAIResponse(query) {
     const lower = query.toLowerCase();
 
