@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v5')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v6')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -25,7 +25,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Ben akıllı Yapay Zeka asistanınızım. Bana matematik işlemleri sorabilir, kod yazdırabilir veya resim yaptırabilirsiniz! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Ben akıllı Yapay Zeka asistanınızım. Bana dilediğin soruyu sorabilir, matematik hesabı yaptırabilir, kod yazdırabilir veya resim yaptırabilirsin! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -53,7 +53,7 @@ function deleteChat(id, event) {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v5', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v6', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -164,13 +164,23 @@ function sendMessage() {
     }, 400);
 }
 
-// Gelişmiş Akıllı Cevap Motoru (Matematik, Kod, Resim ve Sohbet)
+// Gelişmiş Zeka & Yanıt Motoru
 function generateAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // 1. Matematik İşlemlerini Çözme (Örn: 9x9, 5+5, 10/2)
+    // 1. Güvenlik Filtresi (Yasadışı / Zararlı Konular)
+    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet'];
+    for (let word of illegalKeywords) {
+        if (lower.includes(word)) {
+            return {
+                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
+                imageUrl: null
+            };
+        }
+    }
+
+    // 2. Matematik Hesabı (Örn: 9x9, 100/4, 25+30 vb.)
     let cleanMath = lower.replace(/x/g, '*').replace(/×/g, '*').replace(/[:]/g, '/');
-    // Eğer içinde rakam ve matematiksel operatör geçiyorsa hesaplamaya çalış
     if (/[\d]+\s*[\+\-\*\/\\]\s*[\d]+/.test(cleanMath)) {
         try {
             let mathExpr = cleanMath.replace(/[^0-9+\-*/().]/g, '');
@@ -184,18 +194,7 @@ function generateAIResponse(query) {
         } catch (e) {}
     }
 
-    // 2. Güvenlik Filtresi (Kötü/Yasadışı İçerik)
-    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet'];
-    for (let word of illegalKeywords) {
-        if (lower.includes(word)) {
-            return {
-                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
-                imageUrl: null
-            };
-        }
-    }
-
-    // 3. Resim / Görsel Oluşturma
+    // 3. Görsel / Resim Oluşturma
     if (lower.includes('resim yap') || lower.includes('görsel oluştur') || lower.includes('çiz') || lower.includes('resmini çiz')) {
         const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
@@ -204,49 +203,37 @@ function generateAIResponse(query) {
         };
     }
 
-    // 4. Kod Yazma İstekleri
+    // 4. Kod Yazma
     if (lower.includes('kod') || lower.includes('html') || lower.includes('css') || lower.includes('javascript') || lower.includes('python')) {
         return {
-            text: `İstediğin programlama diliyle ilgili örnek kod bloğu:\n\n\`\`\`javascript\n// Örnek Kod\nconsole.log("Proje ödevi başarıyla çalışıyor!");\n\`\`\``,
+            text: `İstediğin konuyla ilgili örnek kod bloğu:\n\n\`\`\`javascript\n// Yapay Zeka Kod Örneği\nfunction hesapla(a, b) {\n    return a + b;\n}\nconsole.log(hesapla(10, 20));\n\`\`\``,
             imageUrl: null
         };
     }
 
-    // 5. Selamlaşma
-    if (lower.includes('merhaba') || lower.includes('selam') || lower.includes('günaydın') || lower.includes('sa')) {
+    // 5. Selamlaşma / Hal Hatır
+    if (lower === 'merhaba' || lower === 'selam' || lower === 'sa' || lower === 'günaydın') {
         return {
-            text: "Aleykümselam! 👋 Bugün size hangi konuda yardımcı olabilirim?",
+            text: "Merhaba! 👋 Bugün sana nasıl yardımcı olabilirim?",
             imageUrl: null
         };
     }
-
-    // 6. Hal Hatır
     if (lower.includes('nasılsın') || lower.includes('nasıl gidiyor')) {
         return {
-            text: "Teşekkür ederim, gayet iyiyim ve projeniz için çalışmaya hazırım! Siz nasılsınız?",
+            text: "Teşekkür ederim, harika çalışıyorum! Sen nasılsın?",
             imageUrl: null
         };
     }
-
-    // 7. Kimsin / Ne işe yarırsın
-    if (lower.includes('kimsin') || lower.includes('adın ne') || lower.includes('ne yapabiliyorsun')) {
+    if (lower.includes('kimsin') || lower.includes('adın ne')) {
         return {
-            text: "Ben HTML, CSS ve JavaScript ile geliştirilmiş özel bir Yapay Zeka proje asistanıyım. Soru sorabilir, matematik hesabı yaptırabilir, kod yazdırabilir ve görsel üretebilirsiniz.",
+            text: "Ben okullar ve projeler için özel tasarlanmış Yapay Zeka asistanıyım.",
             imageUrl: null
         };
     }
 
-    // 8. Matematik / Ders Soruları Genel
-    if (lower.includes('matematik') || lower.includes('ders') || lower.includes('soru')) {
-        return {
-            text: `Tabii ki! Matematik veya derslerinizle ilgili soruyu doğrudan yazabilirsiniz (Örn: \`15*4\` veya \`100/5\` gibi), hemen hesaplayıp yardımcı olayım.`,
-            imageUrl: null
-        };
-    }
-
-    // Genel Akıllı Yanıt
+    // 6. Bilgi ve Soru Cevaplama (Konu Detaylandırma)
     return {
-        text: `"${query}" konusunu inceledim. Bu konuda size yardımcı olmaktan mutluluk duyarım. Daha fazla detay vermemi veya bununla ilgili işlem yapmamı ister misiniz?`,
+        text: `**"${query}"** hakkında detaylı bilgi:\n\nBu konu projeniz için oldukça önemli ve dikkat çekici bir başlıktır. İlgili kavramlar incelendiğinde; doğruluk, erişilebilirlik ve performans açılarından sistemin verimli çalışmasını sağlar. Bu konuda başka merak ettiğin bir soru var mı?`,
         imageUrl: null
     };
 }
