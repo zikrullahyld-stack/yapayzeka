@@ -14,7 +14,7 @@
     <button class="btn primary" id="newChat">+ Yeni sohbet</button>
     <input class="search" id="search" type="search" placeholder="Sohbetlerde ara…" aria-label="Sohbetlerde ara">
     <ul class="list" id="list"></ul>
-    <button class="btn ghost" id="settingsBtn">Google ayarları</button>
+    <button class="btn ghost" id="settingsBtn">Ayarlar</button>
   </aside>
   <main class="main">
     <header class="top">
@@ -24,7 +24,8 @@
     </header>
     <section class="msgs" id="msgs" aria-live="polite"></section>
     <form class="composer" id="form">
-      <input id="input" autocomplete="off" placeholder="Bir konu yaz, Google'da arayıp özetleyeyim…">
+      <label class="toggle"><input type="checkbox" id="web" checked> Webde ara</label>
+      <input id="input" autocomplete="off" placeholder="Bir şey sor…">
       <button class="btn primary" type="submit">Gönder</button>
     </form>
   </main>
@@ -32,10 +33,11 @@
 
 <dialog id="dlg">
   <form method="dialog" class="dlg">
-    <h2>Google arama ayarları</h2>
-    <p>Google Programmable Search API anahtarın ve arama motoru kimliğin (cx) gerekli.</p>
-    <label>API anahtarı<input id="key" autocomplete="off"></label>
-    <label>Arama motoru kimliği (cx)<input id="cx" autocomplete="off"></label>
+    <h2>Ayarlar</h2>
+    <p>Hepsi isteğe bağlı. Anahtarı kodda yazdıysan burayı boş bırakabilirsin.</p>
+    <label>Pollinations API anahtarı<input id="aiKey" autocomplete="off"></label>
+    <label>Google API anahtarı (boşsa Vikipedi kullanılır)<input id="key" autocomplete="off"></label>
+    <label>Google arama motoru kimliği (cx)<input id="cx" autocomplete="off"></label>
     <div class="row"><button class="btn ghost" value="cancel">Kapat</button>
     <button class="btn primary" id="save" value="ok">Kaydet</button></div>
   </form>
