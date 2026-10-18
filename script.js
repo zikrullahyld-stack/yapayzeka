@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v9')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v10')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -25,7 +25,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Ben tam anlamıyla eğitilmiş akıllı Yapay Zeka asistanınızım. Bana hayvanların ayak/kulak sayılarını sorabilir, matematik yaptırabilir, kod yazdırabilir veya resim üretebilirsiniz! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Ben doğrudan internete bağlı, gerçek zamanlı çalışan Yapay Zeka asistanınızım. Bana dilediğiniz her şeyi sorabilirsiniz! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -53,7 +53,7 @@ function deleteChat(id, event) {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v9', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v10', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -134,8 +134,8 @@ function handleKeyDown(event) {
     }
 }
 
-// Mesaj Gönderme Fonksiyonu
-function sendMessage() {
+// Mesaj Gönderme Fonksiyonu (Async / İnternetten Veri Çekme)
+async function sendMessage() {
     const input = document.getElementById('userInput');
     if (!input) return;
     const text = input.value.trim();
@@ -155,118 +155,46 @@ function sendMessage() {
     renderHistory();
     renderMessages();
 
-    // Yapay Zeka Yanıt Simülasyonu
-    setTimeout(() => {
-        let aiResult = generateAIResponse(text);
+    // Kullanıcıya "Yazıyor..." hissi vermek için geçici mesaj veya doğrudan API çağrısı
+    try {
+        let aiResult = await fetchAIResponse(text);
         currentChat.messages.push({ sender: 'ai', text: aiResult.text, imageUrl: aiResult.imageUrl });
         saveChats();
         renderMessages();
-    }, 400);
+    } catch (error) {
+        currentChat.messages.push({ sender: 'ai', text: "Bağlantı hatası oluştu, lütfen tekrar deneyin.", imageUrl: null });
+        saveChats();
+        renderMessages();
+    }
 }
 
-// Tamamen Eğitilmiş Akıllı Yanıt Motoru
-function generateAIResponse(query) {
+// İnternetten Canlı Yanıt Alan Fonksiyon (API Bağlantısı)
+async function fetchAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // 1. Güvenlik Filtresi (Yasadışı / Zararlı Konular)
-    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet'];
-    for (let word of illegalKeywords) {
-        if (lower.includes(word)) {
-            return {
-                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
-                imageUrl: null
-            };
-        }
-    }
-
-    // 2. Hayvan Bilgi Bankası (Ayak ve Kulak Soruları)
-    if (lower.includes('ayak') || lower.includes('kulak') || lower.includes('kaç')) {
-        if (lower.includes('inek')) {
-            return { text: "İneklerin **4 ayağı** ve **2 kulağı** vardır. 🐄", imageUrl: null };
-        }
-        if (lower.includes('kedi')) {
-            return { text: "Kedilerin **4 ayağı** ve **2 kulağı** vardır. 🐱", imageUrl: null };
-        }
-        if (lower.includes('köpek')) {
-            return { text: "Köpeklerin **4 ayağı** ve **2 kulağı** vardır. 🐶", imageUrl: null };
-        }
-        if (lower.includes('at')) {
-            return { text: "Atların **4 ayağı** ve **2 kulağı** vardır. 🐴", imageUrl: null };
-        }
-        if (lower.includes('tavuk')) {
-            return { text: "Tavukların **2 ayağı** ve tüylerinin altında delik şeklinde **2 kulağı** vardır. 🐔", imageUrl: null };
-        }
-        if (lower.includes('kuş')) {
-            return { text: "Kuşların **2 ayağı** vardır, dış kulak kepçeleri yoktur ancak sesleri duyabilirler. 🐦", imageUrl: null };
-        }
-        if (lower.includes('örümcek')) {
-            return { text: "Örümceklerin **8 ayağı** vardır. 🕷️", imageUrl: null };
-        }
-        if (lower.includes('karınca')) {
-            return { text: "Karıncaların **6 ayağı** vardır. 🐜", imageUrl: null };
-        }
-        if (lower.includes('insan')) {
-            return { text: "İnsanların **2 bacağı (ayağı)** ve **2 kulağı** vardır. 👤", imageUrl: null };
-        }
-    }
-
-    // 3. Matematik Hesaplama Motoru (9x9, 50/2 vb.)
-    let cleanMath = lower.replace(/x/g, '*').replace(/×/g, '*').replace(/[:]/g, '/');
-    if (/[\d]+\s*[\+\-\*\/\\]\s*[\d]+/.test(cleanMath)) {
-        try {
-            let mathExpr = cleanMath.replace(/[^0-9+\-*/().]/g, '');
-            let result = Function('"use strict";return (' + mathExpr + ')')();
-            if (!isNaN(result)) {
-                return {
-                    text: `İşlemin sonucu: **${result}** 🧮`,
-                    imageUrl: null
-                };
-            }
-        } catch (e) {}
-    }
-
-    // 4. Görsel / Resim Oluşturma
+    // Görsel / Resim isteği varsa Pollinations Image API kullanıyoruz
     if (lower.includes('resim yap') || lower.includes('görsel oluştur') || lower.includes('çiz') || lower.includes('resmini çiz')) {
         const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
-            text: `İstediğin görseli senin için oluşturdum:`,
+            text: `İstediğin görseli internetten senin için oluşturdum:`,
             imageUrl: `[https://image.pollinations.ai/prompt/$](https://image.pollinations.ai/prompt/$){prompt}`
         };
     }
 
-    // 5. Kod Yazma İstekleri
-    if (lower.includes('kod') || lower.includes('html') || lower.includes('css') || lower.includes('javascript') || lower.includes('python')) {
+    // Diğer tüm sorular için İNTERNETTEN CANLI YAPAY ZEKA API'ye bağlanıyoruz!
+    try {
+        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodeURIComponent(query)}`);
+        const aiText = await response.text();
         return {
-            text: `İstediğin programlama diliyle ilgili örnek kod bloğu:\n\n\`\`\`javascript\n// Eğitilmiş Yapay Zeka Örneği\nconsole.log("Proje ödevi başarıyla çalışıyor!");\n\`\`\``,
+            text: aiText || "Bu konuda veri alınamadı.",
+            imageUrl: null
+        };
+    } catch (err) {
+        return {
+            text: "İnternet bağlantısında bir sorun oluştu.",
             imageUrl: null
         };
     }
-
-    // 6. Selamlaşma ve Hal Hatır
-    if (lower.includes('merhaba') || lower.includes('selam') || lower.includes('sa') || lower.includes('günaydın')) {
-        return {
-            text: "Aleykümselam! 👋 Bugün size hangi konuda yardımcı olabilirim?",
-            imageUrl: null
-        };
-    }
-    if (lower.includes('nasılsın') || lower.includes('nasıl gidiyor')) {
-        return {
-            text: "Teşekkür ederim, tamamen eğitildim ve harika çalışıyorum! Sen nasılsın?",
-            imageUrl: null
-        };
-    }
-    if (lower.includes('kimsin') || lower.includes('adın ne')) {
-        return {
-            text: "Ben HTML, CSS ve JavaScript ile eğitilmiş akıllı bir Yapay Zeka asistanıyım.",
-            imageUrl: null
-        };
-    }
-
-    // 7. Akıllı Konu Açıklama Motoru
-    return {
-        text: `"${query}" hakkında bilmeniz gerekenler: Bu soru oldukça ilgi çekicidir. Belirttiğiniz konu başlığı altında gerekli mantıksal analizler yapılmış olup, temel prensiplere dayalı olarak bu yanıt üretilmiştir. Başka bir sorunuz var mı?`,
-        imageUrl: null
-    };
 }
 
 // Başlat
