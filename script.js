@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v10')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v11')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -25,7 +25,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Ben doğrudan internete bağlı, gerçek zamanlı çalışan Yapay Zeka asistanınızım. Bana dilediğiniz her şeyi sorabilirsiniz! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Doğrudan internete bağlı gerçek bir Yapay Zeka asistanıyım. İnsanın kilosundan uzay bilimine kadar dilediğin her şeyi sorabilirsin! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -53,7 +53,7 @@ function deleteChat(id, event) {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v10', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v11', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -134,7 +134,7 @@ function handleKeyDown(event) {
     }
 }
 
-// Mesaj Gönderme Fonksiyonu (Async / İnternetten Veri Çekme)
+// Mesaj Gönderme Fonksiyonu
 async function sendMessage() {
     const input = document.getElementById('userInput');
     if (!input) return;
@@ -155,9 +155,9 @@ async function sendMessage() {
     renderHistory();
     renderMessages();
 
-    // Kullanıcıya "Yazıyor..." hissi vermek için geçici mesaj veya doğrudan API çağrısı
+    // İnternetten Canlı Yanıt Al
     try {
-        let aiResult = await fetchAIResponse(text);
+        let aiResult = await fetchLiveAIResponse(text);
         currentChat.messages.push({ sender: 'ai', text: aiResult.text, imageUrl: aiResult.imageUrl });
         saveChats();
         renderMessages();
@@ -168,11 +168,22 @@ async function sendMessage() {
     }
 }
 
-// İnternetten Canlı Yanıt Alan Fonksiyon (API Bağlantısı)
-async function fetchAIResponse(query) {
+// Gerçek İnternet API Bağlantısı (Google / Edge / Yandex Gibi Canlı Veri Çeker)
+async function fetchLiveAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // Görsel / Resim isteği varsa Pollinations Image API kullanıyoruz
+    // 1. Sıkı Güvenlik Filtresi (Yasadışı / Zararlı / Kötü İçerikler)
+    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet', 'intihar'];
+    for (let word of illegalKeywords) {
+        if (lower.includes(word)) {
+            return {
+                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı, zararlı veya etik dışı konularda yanıt veremem.",
+                imageUrl: null
+            };
+        }
+    }
+
+    // 2. Görsel / Resim İstekleri (Pollinations Image API)
     if (lower.includes('resim yap') || lower.includes('görsel oluştur') || lower.includes('çiz') || lower.includes('resmini çiz')) {
         const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
@@ -181,12 +192,15 @@ async function fetchAIResponse(query) {
         };
     }
 
-    // Diğer tüm sorular için İNTERNETTEN CANLI YAPAY ZEKA API'ye bağlanıyoruz!
+    // 3. Diğer TÜM Sorular İçin Doğrudan İnternetten Canlı Yanıt Al
     try {
-        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodeURIComponent(query)}`);
+        // Yapay zekaya Türkçe ve doğru yanıt vermesi için talimat ekleyerek internetten sorguluyoruz
+        const enhancedQuery = `${query} (Bu soruyu Türkçe olarak, net, doğru, ayrıntılı ve açıklayıcı bir şekilde yanıtla)`;
+        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodeURIComponent(enhancedQuery)}`);
         const aiText = await response.text();
+        
         return {
-            text: aiText || "Bu konuda veri alınamadı.",
+            text: aiText || "Bu konuda internetten veri alınamadı.",
             imageUrl: null
         };
     } catch (err) {
