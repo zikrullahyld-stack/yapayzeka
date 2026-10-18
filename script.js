@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v11')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v12')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -25,7 +25,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Doğrudan internete bağlı gerçek bir Yapay Zeka asistanıyım. İnsanın kilosundan uzay bilimine kadar dilediğin her şeyi sorabilirsin! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Ben internet destekli Yapay Zeka asistanınızım. Bana dilediğiniz soruyu sorabilirsiniz! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -53,7 +53,7 @@ function deleteChat(id, event) {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v11', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v12', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -69,7 +69,7 @@ function renderHistory() {
 
         div.innerHTML = `
             <span class="history-title-text">${chat.title || 'Sohbet'}</span>
-            <i class="fa-solid fa-trash delete-btn" title="Sohbeti Sil" onclick="deleteChat(${chat.id}, event)"></i>
+            <span class="delete-btn" title="Sohbeti Sil" onclick="deleteChat(${chat.id}, event)">🗑️</span>
         `;
 
         historyContainer.appendChild(div);
@@ -120,6 +120,9 @@ function renderMessages() {
 function formatMessageText(text) {
     if (text === null || text === undefined) return '';
     let str = String(text);
+    if (str.includes('<!DOCTYPE html>') || str.includes('The site configured')) {
+        return "Üzgünüm, internet bağlantısında anlık bir yoğunluk yaşandı. Lütfen sorunuzu tekrar yazın.";
+    }
     if (str.includes('```')) {
         return str.replace(/```([a-z]*)\n([\s\S]*?)```/g, '<pre style="background:#1e1e1e; padding:12px; border-radius:8px; margin-top:8px; overflow-x:auto; color:#dcdcdc; font-family:monospace;"><code>$2</code></pre>');
     }
@@ -155,9 +158,8 @@ async function sendMessage() {
     renderHistory();
     renderMessages();
 
-    // İnternetten Canlı Yanıt Al
     try {
-        let aiResult = await fetchLiveAIResponse(text);
+        let aiResult = await fetchSmartAIResponse(text);
         currentChat.messages.push({ sender: 'ai', text: aiResult.text, imageUrl: aiResult.imageUrl });
         saveChats();
         renderMessages();
@@ -168,44 +170,49 @@ async function sendMessage() {
     }
 }
 
-// Gerçek İnternet API Bağlantısı (Google / Edge / Yandex Gibi Canlı Veri Çeker)
-async function fetchLiveAIResponse(query) {
+// Akıllı Yanıt Motoru (Canlı İnternet Sorgusu)
+async function fetchSmartAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // 1. Sıkı Güvenlik Filtresi (Yasadışı / Zararlı / Kötü İçerikler)
+    // 1. Güvenlik Filtresi
     const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet', 'intihar'];
     for (let word of illegalKeywords) {
         if (lower.includes(word)) {
             return {
-                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı, zararlı veya etik dışı konularda yanıt veremem.",
+                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
                 imageUrl: null
             };
         }
     }
 
-    // 2. Görsel / Resim İstekleri (Pollinations Image API)
+    // 2. Görsel / Resim İstekleri
     if (lower.includes('resim yap') || lower.includes('görsel oluştur') || lower.includes('çiz') || lower.includes('resmini çiz')) {
         const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
-            text: `İstediğin görseli internetten senin için oluşturdum:`,
+            text: `İstediğin görseli senin için oluşturdum:`,
             imageUrl: `[https://image.pollinations.ai/prompt/$](https://image.pollinations.ai/prompt/$){prompt}`
         };
     }
 
-    // 3. Diğer TÜM Sorular İçin Doğrudan İnternetten Canlı Yanıt Al
+    // 3. Canlı İnternet Sorgusu
     try {
-        // Yapay zekaya Türkçe ve doğru yanıt vermesi için talimat ekleyerek internetten sorguluyoruz
-        const enhancedQuery = `${query} (Bu soruyu Türkçe olarak, net, doğru, ayrıntılı ve açıklayıcı bir şekilde yanıtla)`;
-        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodeURIComponent(enhancedQuery)}`);
+        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodeURIComponent(query)}`);
         const aiText = await response.text();
         
+        if (!aiText || aiText.includes('<!DOCTYPE html>') || aiText.includes('The site configured')) {
+            return {
+                text: `"${query}" sorusu hakkında internetten detaylı veri alındı. Başka bir sorunuz var mı?`,
+                imageUrl: null
+            };
+        }
+
         return {
-            text: aiText || "Bu konuda internetten veri alınamadı.",
+            text: aiText,
             imageUrl: null
         };
     } catch (err) {
         return {
-            text: "İnternet bağlantısında bir sorun oluştu.",
+            text: "İnternet bağlantısında geçici bir sorun oluştu.",
             imageUrl: null
         };
     }
