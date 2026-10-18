@@ -55,3 +55,5 @@ dialog::backdrop{background:rgba(5,8,25,.6)}
  .toggle{font-size:.75rem}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.msg img{display:block;max-width:100%;border-radius:14px;margin-top:10px}
+.msg b{color:#fff}
