@@ -60,7 +60,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Ne öğrenmek istersin?</b>Sohbet edebilir, Vikipedi\'den araştırabilir ya da "kedi resmi oluştur" diyerek görsel üretebilirim.</div>';
+    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "kedi resmi oluştur" yazabilirsin.</div>';
     return;
   }
   box.innerHTML = '';
@@ -102,37 +102,19 @@ async function callAI(messages) {
   return out;
 }
 
-/* ---------- Karar verici: sohbet mi, araştırma mı, görsel mi? ---------- */
-const GREETING = /^(merhaba|selam|slm|hey|naber|nasılsın|nbr|günaydın|iyi akşamlar|iyi geceler|teşekkür|sağ ol|sağol|eyvallah|tamam|ok|peki|evet|hayır)\b/i;
+/* ---------- Mesaj türünü belirleme ---------- */
 const IMG_WORD = /(fotoğraf|foto\b|resim|görsel|logo|illüstrasyon|çizim)/i;
 const IMG_ACT = /(oluştur|yap\b|yapar|üret|çiz|hazırla|istiyorum)/i;
+const isImage = q => q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q));
+const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
 
-function fallbackRoute(q) {
-  if (q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q))) return { mode: 'image', query: '' };
-  if (GREETING.test(q) && q.length < 40) return { mode: 'chat', query: '' };
-  return { mode: 'search', query: q };
-}
-
-async function route(q, history) {
-  if (q.startsWith('/resim')) return { mode: 'image', query: '' };
-  if (GREETING.test(q) && q.length < 40) return { mode: 'chat', query: '' };
-  try {
-    const out = await callAI([
-      { role: 'system', content:
-        'Kullanıcının son mesajını sınıflandır. SADECE şu JSON biçiminde cevap ver: {"mode":"chat","query":""}\n' +
-        'mode değerleri:\n' +
-        '- "chat": selamlaşma, hal hatır, teşekkür, görüş isteme, matematik, kod yazma, yaratıcı yazı, önceki konuşmaya devam eden sorular, genel sohbet.\n' +
-        '- "search": Vikipedi\'de bulunabilecek bilgi soruları: kişi, yer, tarih, bilim, hayvan, olay, kavram gibi gerçek dünya bilgisi.\n' +
-        '- "image": kullanıcı bir görsel, fotoğraf, resim veya logo oluşturulmasını istiyor.\n' +
-        'query: sadece "search" modunda, Vikipedi aramasına yazılacak konu adı (en fazla 4 kelime, soru ekleri olmadan). Örnek: "eşeklerin kaç ayağı var" -> "eşek". Diğer modlarda boş bırak.' },
-      ...history.slice(-4),
-      { role: 'user', content: q }
-    ]);
-    const m = out.match(/\{[\s\S]*\}/);
-    const j = JSON.parse(m[0]);
-    if (['chat', 'search', 'image'].includes(j.mode)) return { mode: j.mode, query: j.query || q };
-  } catch (e) { console.warn(e); }
-  return fallbackRoute(q);
+function topicOf(q) {
+  const t = q
+    .replace(/araşt\S*|arast\S*/gi, ' ')
+    .replace(/(^|\s)(lütfen|bana|bunu|şunu|kelimesini|kelimesi|hakkında|konusunu|konusu|için|bir|şu|bu)(?=\s|$)/gi, ' ')
+    .replace(/[?!.,]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return t || q;
 }
 
 /* ---------- Görsel üretimi ---------- */
@@ -162,8 +144,9 @@ async function makeImage(q, bot) {
 
 /* ---------- Soru cevap ---------- */
 const BASE_RULES =
-  'Sen Cam AI adlı bir yapay zeka asistansın. Türkçe, doğal ve kısa cevap ver. ' +
-  'Sorulmayan örnek, ek bilgi veya "istersen şunu da yapabilirim" gibi teklifler ekleme. ' +
+  'Sen Cam AI adlı bir yapay zeka asistansın. Türkçe, doğal, samimi ve kısa cevap ver. ' +
+  'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
+  'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
   'Görsel oluşturamazsın, görsel ürettiğini veya üreteceğini asla söyleme.';
 
 async function ask(q) {
@@ -176,20 +159,24 @@ async function ask(q) {
   c.msgs.push(bot); save(); render();
 
   try {
-    const r = await route(q, history);
-    if (r.mode === 'image') {
+    if (isImage(q)) {
       bot.text = 'Görsel hazırlanıyor…'; renderMsgs();
       await makeImage(q, bot);
     } else {
-      let sources = [];
-      if (r.mode === 'search' && $('#web').checked) {
-        bot.text = 'Vikipedi\'de aranıyor…'; renderMsgs();
-        try { sources = await wikiSearch(r.query || q); } catch (e) { console.warn(e); }
+      let sources = [], searched = false;
+      if (isSearch(q) && $('#web').checked) {
+        searched = true;
+        const topic = topicOf(q);
+        bot.text = `Vikipedi'de "${topic}" aranıyor…`; renderMsgs();
+        try { sources = await wikiSearch(topic); } catch (e) { console.warn(e); }
       }
       const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
-      const system = BASE_RULES + (ctx
-        ? ' Aşağıda Vikipedi kaynakları var. Soruyla gerçekten ilgiliyse kullan ve kullandığın bilgiye [1], [2] gibi numara koy. İlgili değilse kaynakları tamamen yok say, numara yazma ve kendi bilginle cevap ver.\n\nVikipedi kaynakları:\n' + ctx
-        : '');
+      let system = BASE_RULES;
+      if (ctx) {
+        system += ' Kullanıcı bir konuyu araştırmanı istedi. Aşağıdaki Vikipedi kaynaklarını kullanarak konuyu en yaygın anlamıyla kısaca özetle. Kullandığın bilgiye [1], [2] gibi numara koy. Kaynak soruyla ilgili değilse onu kullanma.\n\nVikipedi kaynakları:\n' + ctx;
+      } else if (searched) {
+        system += ' Kullanıcı bir konuyu araştırmanı istedi ama Vikipedi\'de sonuç bulunamadı. Bunu kısaca söyle ve kendi bilginle kısa bir cevap ver.';
+      }
       bot.text = 'Cevap yazılıyor…'; renderMsgs();
       const answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
       const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
