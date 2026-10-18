@@ -60,7 +60,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Ne öğrenmek istersin?</b>Bir şey sor ya da "kedi resmi oluştur" yaz.</div>';
+    box.innerHTML = '<div class="hello"><b>Ne öğrenmek istersin?</b>Sohbet edebilir, Vikipedi\'den araştırabilir ya da "kedi resmi oluştur" diyerek görsel üretebilirim.</div>';
     return;
   }
   box.innerHTML = '';
@@ -74,26 +74,18 @@ function renderMsgs() {
 }
 function render() { renderList(); renderMsgs(); }
 
-/* ---------- Web verisi: Google varsa Google, yoksa Vikipedi ---------- */
-async function googleSearch(q) {
-  const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(cfg.key)}&cx=${encodeURIComponent(cfg.cx)}&hl=tr&num=6&q=${encodeURIComponent(q)}`;
-  const r = await fetch(url);
-  const d = await r.json();
-  if (!r.ok) throw new Error('Google: ' + (d.error?.message || r.status));
-  return (d.items || []).map(i => ({ title: i.title, link: i.link, text: (i.snippet || '').replace(/\s+/g, ' ') }));
-}
+/* ---------- Vikipedi araştırması ---------- */
 async function wikiSearch(q) {
-  const url = 'https://tr.wikipedia.org/w/api.php?action=query&generator=search&gsrlimit=4&prop=extracts|info&exintro=1&explaintext=1&exchars=900&exlimit=max&inprop=url&format=json&origin=*&gsrsearch=' + encodeURIComponent(q);
+  const url = 'https://tr.wikipedia.org/w/api.php?action=query&generator=search&gsrlimit=4' +
+    '&prop=extracts|info&exintro=1&explaintext=1&exchars=1500&exlimit=max&inprop=url' +
+    '&format=json&origin=*&gsrsearch=' + encodeURIComponent(q);
   const r = await fetch(url);
+  if (!r.ok) throw new Error('Vikipedi isteği başarısız oldu (' + r.status + ').');
   const d = await r.json();
   const pages = Object.values(d.query?.pages || {}).sort((a, b) => a.index - b.index);
-  return pages.map(p => ({ title: p.title, link: p.fullurl, text: (p.extract || '').replace(/\s+/g, ' ') }));
-}
-async function webSearch(q) {
-  if (cfg.key && cfg.cx) {
-    try { return await googleSearch(q); } catch (e) { console.warn(e); }
-  }
-  return wikiSearch(q);
+  return pages
+    .map(p => ({ title: p.title, link: p.fullurl, text: (p.extract || '').replace(/\s+/g, ' ').trim() }))
+    .filter(p => p.text.length > 40);
 }
 
 /* ---------- Yapay zeka (OpenAI uyumlu API) ---------- */
@@ -110,10 +102,46 @@ async function callAI(messages) {
   return out;
 }
 
-/* ---------- Görsel üretimi ---------- */
+/* ---------- Karar verici: sohbet mi, araştırma mı, görsel mi? ---------- */
+const GREETING = /^(merhaba|selam|slm|hey|naber|nasılsın|nbr|günaydın|iyi akşamlar|iyi geceler|teşekkür|sağ ol|sağol|eyvallah|tamam|ok|peki|evet|hayır)\b/i;
 const IMG_WORD = /(fotoğraf|foto\b|resim|görsel|logo|illüstrasyon|çizim)/i;
 const IMG_ACT = /(oluştur|yap\b|yapar|üret|çiz|hazırla|istiyorum)/i;
-const isImageRequest = q => q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q));
+
+function fallbackRoute(q) {
+  if (q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q))) return { mode: 'image', query: '' };
+  if (GREETING.test(q) && q.length < 40) return { mode: 'chat', query: '' };
+  return { mode: 'search', query: q };
+}
+
+async function route(q, history) {
+  if (q.startsWith('/resim')) return { mode: 'image', query: '' };
+  if (GREETING.test(q) && q.length < 40) return { mode: 'chat', query: '' };
+  try {
+    const out = await callAI([
+      { role: 'system', content:
+        'Kullanıcının son mesajını sınıflandır. SADECE şu JSON biçiminde cevap ver: {"mode":"chat","query":""}\n' +
+        'mode değerleri:\n' +
+        '- "chat": selamlaşma, hal hatır, teşekkür, görüş isteme, matematik, kod yazma, yaratıcı yazı, önceki konuşmaya devam eden sorular, genel sohbet.\n' +
+        '- "search": Vikipedi\'de bulunabilecek bilgi soruları: kişi, yer, tarih, bilim, hayvan, olay, kavram gibi gerçek dünya bilgisi.\n' +
+        '- "image": kullanıcı bir görsel, fotoğraf, resim veya logo oluşturulmasını istiyor.\n' +
+        'query: sadece "search" modunda, Vikipedi aramasına yazılacak konu adı (en fazla 4 kelime, soru ekleri olmadan). Örnek: "eşeklerin kaç ayağı var" -> "eşek". Diğer modlarda boş bırak.' },
+      ...history.slice(-4),
+      { role: 'user', content: q }
+    ]);
+    const m = out.match(/\{[\s\S]*\}/);
+    const j = JSON.parse(m[0]);
+    if (['chat', 'search', 'image'].includes(j.mode)) return { mode: j.mode, query: j.query || q };
+  } catch (e) { console.warn(e); }
+  return fallbackRoute(q);
+}
+
+/* ---------- Görsel üretimi ---------- */
+window.imgFail = img => {
+  const src = img.src;
+  const show = t => img.replaceWith(document.createTextNode(t));
+  fetch(src).then(async r => show(`Görsel oluşturulamadı (${r.status}). ${(await r.text()).slice(0, 150)}`))
+    .catch(() => show('Görsel oluşturulamadı. Bağlantıyı veya bakiyeni kontrol et.'));
+};
 
 async function makeImage(q, bot) {
   let prompt = q.replace(/^\/resim\s*/i, '');
@@ -129,44 +157,46 @@ async function makeImage(q, bot) {
     (hasKey() ? '&key=' + encodeURIComponent(cfg.aiKey) : '');
   bot.text = 'Görsel: ' + q;
   bot.html = 'İşte görselin:<img src="' + esc(url) + '" alt="' + esc(q) + '" ' +
-    'onload="this.closest(\'#msgs\').scrollTop=1e9" ' +
-    'onerror="this.replaceWith(document.createTextNode(\'Görsel oluşturulamadı. Anahtarını ve bakiyeni kontrol et.\'))">';
+    'onload="this.closest(\'#msgs\').scrollTop=1e9" onerror="imgFail(this)">';
 }
 
 /* ---------- Soru cevap ---------- */
+const BASE_RULES =
+  'Sen Cam AI adlı bir yapay zeka asistansın. Türkçe, doğal ve kısa cevap ver. ' +
+  'Sorulmayan örnek, ek bilgi veya "istersen şunu da yapabilirim" gibi teklifler ekleme. ' +
+  'Görsel oluşturamazsın, görsel ürettiğini veya üreteceğini asla söyleme.';
+
 async function ask(q) {
   const c = current() || (newChat(), current());
   if (c.title === 'Yeni sohbet') c.title = q.slice(0, 40);
-  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img')).slice(-8)
+  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img') && !m.text.startsWith('Hata:')).slice(-8)
     .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   c.msgs.push({ role: 'user', text: q });
   const bot = { role: 'ai', text: 'Düşünüyorum…', pending: true };
   c.msgs.push(bot); save(); render();
 
   try {
-    if (isImageRequest(q)) {
+    const r = await route(q, history);
+    if (r.mode === 'image') {
       bot.text = 'Görsel hazırlanıyor…'; renderMsgs();
       await makeImage(q, bot);
     } else {
       let sources = [];
-      if ($('#web').checked) {
-        bot.text = 'Webde aranıyor…'; renderMsgs();
-        try { sources = (await webSearch(q)).filter(s => s.text); } catch (e) { console.warn(e); }
+      if (r.mode === 'search' && $('#web').checked) {
+        bot.text = 'Vikipedi\'de aranıyor…'; renderMsgs();
+        try { sources = await wikiSearch(r.query || q); } catch (e) { console.warn(e); }
       }
       const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
-      const system =
-        'Sen Cam AI adlı bir yapay zeka asistansın. Türkçe, doğrudan ve kısa cevap ver. ' +
-        'Sorulmayan örnek, ek bilgi veya "istersen şunu da yapabilirim" gibi teklif ekleme. ' +
-        'Görsel oluşturamazsın, görsel ürettiğini veya üreteceğini asla söyleme. ' +
-        (ctx ? 'Aşağıdaki kaynaklar soruyla gerçekten ilgiliyse kullan ve kullandığın bilgiye [1], [2] gibi numara koy. ' +
-          'İlgili değilse kaynakları tamamen yok say ve numara yazma.\n\nKaynaklar:\n' + ctx : '');
+      const system = BASE_RULES + (ctx
+        ? ' Aşağıda Vikipedi kaynakları var. Soruyla gerçekten ilgiliyse kullan ve kullandığın bilgiye [1], [2] gibi numara koy. İlgili değilse kaynakları tamamen yok say, numara yazma ve kendi bilginle cevap ver.\n\nVikipedi kaynakları:\n' + ctx
+        : '');
       bot.text = 'Cevap yazılıyor…'; renderMsgs();
       const answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
       const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
         .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
       bot.text = answer;
       bot.html = fmt(answer) + (used.length
-        ? '<h3>Kaynaklar</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
+        ? '<h3>Kaynaklar (Vikipedi)</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
         : '');
     }
   } catch (e) {
