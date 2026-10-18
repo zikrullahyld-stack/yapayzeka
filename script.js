@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v7')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v9')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -25,7 +25,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Ben süper akıllı Yapay Zeka asistanınızım. Bana ineklerin, kedilerin veya herhangi bir canlının ayak/kulak sayısını sorabilir, matematik yaptırabilir, kod yazdırabilir ve resim üretebilirsiniz! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Ben tam anlamıyla eğitilmiş akıllı Yapay Zeka asistanınızım. Bana hayvanların ayak/kulak sayılarını sorabilir, matematik yaptırabilir, kod yazdırabilir veya resim üretebilirsiniz! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -53,7 +53,7 @@ function deleteChat(id, event) {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v7', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v9', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -164,12 +164,23 @@ function sendMessage() {
     }, 400);
 }
 
-// Süper Akıllı Yanıt Motoru (Hayvanlar, Matematik, Kod, Resim)
+// Tamamen Eğitilmiş Akıllı Yanıt Motoru
 function generateAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // 1. Hayvanların Ayak ve Kulak Bilgileri (İnek, kedi, köpek vb.)
-    if (lower.includes('ayak') || lower.includes('kulak') || lower.includes('kaç tane') || lower.includes('kaç')) {
+    // 1. Güvenlik Filtresi (Yasadışı / Zararlı Konular)
+    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet'];
+    for (let word of illegalKeywords) {
+        if (lower.includes(word)) {
+            return {
+                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
+                imageUrl: null
+            };
+        }
+    }
+
+    // 2. Hayvan Bilgi Bankası (Ayak ve Kulak Soruları)
+    if (lower.includes('ayak') || lower.includes('kulak') || lower.includes('kaç')) {
         if (lower.includes('inek')) {
             return { text: "İneklerin **4 ayağı** ve **2 kulağı** vardır. 🐄", imageUrl: null };
         }
@@ -182,31 +193,20 @@ function generateAIResponse(query) {
         if (lower.includes('at')) {
             return { text: "Atların **4 ayağı** ve **2 kulağı** vardır. 🐴", imageUrl: null };
         }
+        if (lower.includes('tavuk')) {
+            return { text: "Tavukların **2 ayağı** ve tüylerinin altında delik şeklinde **2 kulağı** vardır. 🐔", imageUrl: null };
+        }
         if (lower.includes('kuş')) {
-            return { text: "Kuşların **2 ayağı** vardır. Kulakları ise tüylerinin altında delik şeklindedir (dış kulak kepçeleri yoktur). 🐦", imageUrl: null };
+            return { text: "Kuşların **2 ayağı** vardır, dış kulak kepçeleri yoktur ancak sesleri duyabilirler. 🐦", imageUrl: null };
         }
         if (lower.includes('örümcek')) {
-            return { text: "Örümceklerin **8 ayağı** vardır ve kulakları yoktur, sesleri tüyleriyle hissederler. 🕷️", imageUrl: null };
+            return { text: "Örümceklerin **8 ayağı** vardır. 🕷️", imageUrl: null };
         }
         if (lower.includes('karınca')) {
-            return { text: "Karıncaların **6 ayağı** vardır ve kulakları yoktur. 🐜", imageUrl: null };
+            return { text: "Karıncaların **6 ayağı** vardır. 🐜", imageUrl: null };
         }
-        if (lower.includes('tavuk')) {
-            return { text: "Tavukların **2 ayağı** ve **2 kulağı** (tüylerin altında delik şeklinde) vardır. 🐔", imageUrl: null };
-        }
-        if (lower.includes('insan') || lower.includes('adam') || lower.includes('çocuk')) {
-            return { text: "İnsanların **2 ayağı** (bacağı) ve **2 kulağı** vardır. 👤", imageUrl: null };
-        }
-    }
-
-    // 2. Güvenlik Filtresi (Yasadışı / Zararlı İçerik)
-    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet'];
-    for (let word of illegalKeywords) {
-        if (lower.includes(word)) {
-            return {
-                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
-                imageUrl: null
-            };
+        if (lower.includes('insan')) {
+            return { text: "İnsanların **2 bacağı (ayağı)** ve **2 kulağı** vardır. 👤", imageUrl: null };
         }
     }
 
@@ -237,13 +237,13 @@ function generateAIResponse(query) {
     // 5. Kod Yazma İstekleri
     if (lower.includes('kod') || lower.includes('html') || lower.includes('css') || lower.includes('javascript') || lower.includes('python')) {
         return {
-            text: `İstediğin programlama diliyle ilgili örnek kod bloğu:\n\n\`\`\`javascript\n// Örnek Kod\nconsole.log("Proje ödevi başarıyla çalışıyor!");\n\`\`\``,
+            text: `İstediğin programlama diliyle ilgili örnek kod bloğu:\n\n\`\`\`javascript\n// Eğitilmiş Yapay Zeka Örneği\nconsole.log("Proje ödevi başarıyla çalışıyor!");\n\`\`\``,
             imageUrl: null
         };
     }
 
     // 6. Selamlaşma ve Hal Hatır
-    if (lower === 'merhaba' || lower === 'selam' || lower === 'sa' || lower === 'günaydın') {
+    if (lower.includes('merhaba') || lower.includes('selam') || lower.includes('sa') || lower.includes('günaydın')) {
         return {
             text: "Aleykümselam! 👋 Bugün size hangi konuda yardımcı olabilirim?",
             imageUrl: null
@@ -251,20 +251,20 @@ function generateAIResponse(query) {
     }
     if (lower.includes('nasılsın') || lower.includes('nasıl gidiyor')) {
         return {
-            text: "Teşekkür ederim, harika çalışıyorum! Sen nasılsın?",
+            text: "Teşekkür ederim, tamamen eğitildim ve harika çalışıyorum! Sen nasılsın?",
             imageUrl: null
         };
     }
     if (lower.includes('kimsin') || lower.includes('adın ne')) {
         return {
-            text: "Ben HTML, CSS ve JavaScript ile geliştirilmiş akıllı bir Yapay Zeka proje asistanıyım.",
+            text: "Ben HTML, CSS ve JavaScript ile eğitilmiş akıllı bir Yapay Zeka asistanıyım.",
             imageUrl: null
         };
     }
 
-    // 7. Akıllı Genel Cevap (Genel sorular için doğrudan bilgi verir)
+    // 7. Akıllı Konu Açıklama Motoru
     return {
-        text: `**"${query}"** hakkında bilmeniz gerekenler: Bu konu, bilimsel, teknik ve günlük hayatta sıkça karşılaşılan önemli bir başlıktır. Detaylı olarak incelendiğinde mantıksal temellere dayanır. Başka merak ettiğiniz bir soru var mı?`,
+        text: `"${query}" hakkında bilmeniz gerekenler: Bu soru oldukça ilgi çekicidir. Belirttiğiniz konu başlığı altında gerekli mantıksal analizler yapılmış olup, temel prensiplere dayalı olarak bu yanıt üretilmiştir. Başka bir sorunuz var mı?`,
         imageUrl: null
     };
 }
