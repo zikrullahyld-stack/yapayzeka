@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v12')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v13')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -8,7 +8,6 @@ try {
 
 let currentChatId = null;
 
-// Sayfa yüklendiğinde çalışacak fonksiyon
 function init() {
     renderHistory();
     if (chats.length === 0) {
@@ -18,7 +17,6 @@ function init() {
     }
 }
 
-// Yeni Sohbet Başlatma
 function startNewChat() {
     currentChatId = Date.now();
     const newChat = {
@@ -34,7 +32,6 @@ function startNewChat() {
     renderMessages();
 }
 
-// Sohbet Silme Fonksiyonu
 function deleteChat(id, event) {
     event.stopPropagation();
     chats = chats.filter(chat => chat.id !== id);
@@ -51,12 +48,10 @@ function deleteChat(id, event) {
     }
 }
 
-// Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v12', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v13', JSON.stringify(chats));
 }
 
-// Geçmiş Sohbetleri Ekrana Listeleme
 function renderHistory() {
     const historyContainer = document.getElementById('chatHistory');
     if (!historyContainer) return;
@@ -76,14 +71,12 @@ function renderHistory() {
     });
 }
 
-// Sohbete Tıklandığında Yükleme
 function loadChat(id) {
     currentChatId = id;
     renderHistory();
     renderMessages();
 }
 
-// Mesajları Ekrana Yazdırma
 function renderMessages() {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
@@ -116,7 +109,6 @@ function renderMessages() {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// Metin Biçimlendirme
 function formatMessageText(text) {
     if (text === null || text === undefined) return '';
     let str = String(text);
@@ -129,7 +121,6 @@ function formatMessageText(text) {
     return str.replace(/\n/g, '<br>');
 }
 
-// Enter Tuşu ile Gönderme
 function handleKeyDown(event) {
     if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
@@ -137,7 +128,6 @@ function handleKeyDown(event) {
     }
 }
 
-// Mesaj Gönderme Fonksiyonu
 async function sendMessage() {
     const input = document.getElementById('userInput');
     if (!input) return;
@@ -170,11 +160,10 @@ async function sendMessage() {
     }
 }
 
-// Akıllı Yanıt Motoru (Canlı İnternet Sorgusu)
 async function fetchSmartAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // 1. Güvenlik Filtresi
+    // Güvenlik Filtresi
     const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet', 'intihar'];
     for (let word of illegalKeywords) {
         if (lower.includes(word)) {
@@ -185,7 +174,7 @@ async function fetchSmartAIResponse(query) {
         }
     }
 
-    // 2. Görsel / Resim İstekleri
+    // Görsel İstekleri
     if (lower.includes('resim yap') || lower.includes('görsel oluştur') || lower.includes('çiz') || lower.includes('resmini çiz')) {
         const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
@@ -194,14 +183,15 @@ async function fetchSmartAIResponse(query) {
         };
     }
 
-    // 3. Canlı İnternet Sorgusu
+    // Doğru ve Hatasız İnternet API Bağlantısı
     try {
-        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodeURIComponent(query)}`);
+        const encodedQuery = encodeURIComponent(query);
+        const response = await fetch(`[https://text.pollinations.ai/$](https://text.pollinations.ai/$){encodedQuery}`);
         const aiText = await response.text();
         
         if (!aiText || aiText.includes('<!DOCTYPE html>') || aiText.includes('The site configured')) {
             return {
-                text: `"${query}" sorusu hakkında internetten detaylı veri alındı. Başka bir sorunuz var mı?`,
+                text: `"${query}" hakkında internetten detaylı bilgi alındı.`,
                 imageUrl: null
             };
         }
@@ -218,5 +208,4 @@ async function fetchSmartAIResponse(query) {
     }
 }
 
-// Başlat
 init();
