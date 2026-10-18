@@ -4,7 +4,6 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 };
 
-// Anahtarını sadece aşağıdaki tırnakların içine yapıştır
 const DEFAULTS = {
   aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',
   key: '',
@@ -12,13 +11,20 @@ const DEFAULTS = {
 };
 
 let chats = store.get('camai.chats', []);
-let cfg = { ...DEFAULTS, ...store.get('camai.cfg', {}) };
+let saved = store.get('camai.cfg', {});
+let cfg = {
+  aiKey: saved.aiKey || DEFAULTS.aiKey,
+  key: saved.key || DEFAULTS.key,
+  cx: saved.cx || DEFAULTS.cx
+};
 let currentId = null;
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const save = () => store.set('camai.chats', chats);
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const current = () => chats.find(c => c.id === currentId);
+const hasKey = () => !!cfg.aiKey;
+const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 
 /* ---------- Sohbet yönetimi ---------- */
 function newChat() {
@@ -54,7 +60,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Ne öğrenmek istersin?</b>Bir şey sor. Gerekirse webde arayıp kaynaklarla özetlerim.</div>';
+    box.innerHTML = '<div class="hello"><b>Ne öğrenmek istersin?</b>Bir şey sor ya da "kedi resmi oluştur" yaz.</div>';
     return;
   }
   box.innerHTML = '';
@@ -92,10 +98,9 @@ async function webSearch(q) {
 
 /* ---------- Yapay zeka (OpenAI uyumlu API) ---------- */
 async function callAI(messages) {
-  const keyed = !!cfg.aiKey && cfg.aiKey !== 'BURAYA_ANAHTAR';
-  const url = keyed ? 'https://gen.pollinations.ai/v1/chat/completions' : 'https://text.pollinations.ai/openai';
+  const url = hasKey() ? 'https://gen.pollinations.ai/v1/chat/completions' : 'https://text.pollinations.ai/openai';
   const headers = { 'Content-Type': 'application/json' };
-  if (keyed) headers.Authorization = 'Bearer ' + cfg.aiKey;
+  if (hasKey()) headers.Authorization = 'Bearer ' + cfg.aiKey;
   const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model: 'openai', messages }) });
   const raw = await r.text();
   if (!r.ok) throw new Error(`Yapay zeka hizmeti hata verdi (${r.status}). ${raw.slice(0, 200)}`);
@@ -105,29 +110,65 @@ async function callAI(messages) {
   return out;
 }
 
+/* ---------- Görsel üretimi ---------- */
+const IMG_WORD = /(fotoğraf|foto\b|resim|görsel|logo|illüstrasyon|çizim)/i;
+const IMG_ACT = /(oluştur|yap\b|yapar|üret|çiz|hazırla|istiyorum)/i;
+const isImageRequest = q => q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q));
+
+async function makeImage(q, bot) {
+  let prompt = q.replace(/^\/resim\s*/i, '');
+  try {
+    prompt = await callAI([
+      { role: 'system', content: 'Kullanıcının isteğinden, görsel üretim modeli için kısa ve ayrıntılı bir İngilizce prompt yaz. Sadece prompt metnini ver, başka hiçbir şey yazma.' },
+      { role: 'user', content: prompt }
+    ]);
+  } catch (e) { console.warn(e); }
+  prompt = prompt.replace(/["\n]/g, ' ').slice(0, 500).trim();
+  const url = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) +
+    '?width=1024&height=1024&seed=' + Math.floor(Math.random() * 1e6) +
+    (hasKey() ? '&key=' + encodeURIComponent(cfg.aiKey) : '');
+  bot.text = 'Görsel: ' + q;
+  bot.html = 'İşte görselin:<img src="' + esc(url) + '" alt="' + esc(q) + '" ' +
+    'onload="this.closest(\'#msgs\').scrollTop=1e9" ' +
+    'onerror="this.replaceWith(document.createTextNode(\'Görsel oluşturulamadı. Anahtarını ve bakiyeni kontrol et.\'))">';
+}
+
+/* ---------- Soru cevap ---------- */
 async function ask(q) {
   const c = current() || (newChat(), current());
   if (c.title === 'Yeni sohbet') c.title = q.slice(0, 40);
-  const history = c.msgs.filter(m => !m.pending).slice(-8).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img')).slice(-8)
+    .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   c.msgs.push({ role: 'user', text: q });
   const bot = { role: 'ai', text: 'Düşünüyorum…', pending: true };
   c.msgs.push(bot); save(); render();
 
-  let sources = [];
   try {
-    if ($('#web').checked) {
-      bot.text = 'Webde aranıyor…'; renderMsgs();
-      try { sources = (await webSearch(q)).filter(s => s.text); } catch (e) { console.warn(e); }
+    if (isImageRequest(q)) {
+      bot.text = 'Görsel hazırlanıyor…'; renderMsgs();
+      await makeImage(q, bot);
+    } else {
+      let sources = [];
+      if ($('#web').checked) {
+        bot.text = 'Webde aranıyor…'; renderMsgs();
+        try { sources = (await webSearch(q)).filter(s => s.text); } catch (e) { console.warn(e); }
+      }
+      const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
+      const system =
+        'Sen Cam AI adlı bir yapay zeka asistansın. Türkçe, doğrudan ve kısa cevap ver. ' +
+        'Sorulmayan örnek, ek bilgi veya "istersen şunu da yapabilirim" gibi teklif ekleme. ' +
+        'Görsel oluşturamazsın, görsel ürettiğini veya üreteceğini asla söyleme. ' +
+        (ctx ? 'Aşağıdaki kaynaklar soruyla gerçekten ilgiliyse kullan ve kullandığın bilgiye [1], [2] gibi numara koy. ' +
+          'İlgili değilse kaynakları tamamen yok say ve numara yazma.\n\nKaynaklar:\n' + ctx : '');
+      bot.text = 'Cevap yazılıyor…'; renderMsgs();
+      const answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
+      const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
+        .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
+      bot.text = answer;
+      bot.html = fmt(answer) + (used.length
+        ? '<h3>Kaynaklar</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
+        : '');
     }
-    const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
-    const system = 'Sen Cam AI adlı yardımcı bir yapay zekasın. Kullanıcıyla Türkçe, açık ve kısa konuş. ' +
-      (ctx ? 'Aşağıdaki web kaynaklarını kullanarak özetle. Kullandığın bilgiyi [1], [2] gibi numaralarla belirt. Kaynaklar yetersizse bunu söyle.\n\nKaynaklar:\n' + ctx : '');
-    bot.text = 'Cevap yazılıyor…'; renderMsgs();
-    const answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
-    bot.text = answer;
-    bot.html = esc(answer) + (sources.length
-      ? '<h3>Kaynaklar</h3>' + sources.map((s, i) => `<div class="src">[${i + 1}] <a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.title)}</a></div>`).join('')
-      : '');
   } catch (e) {
     bot.text = 'Hata: ' + e.message;
     delete bot.html;
@@ -147,8 +188,7 @@ $('#delCur').onclick = () => currentId && deleteChat(currentId);
 $('#search').oninput = renderList;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
 $('#settingsBtn').onclick = () => {
-  $('#aiKey').value = cfg.aiKey === 'BURAYA_ANAHTAR' ? '' : (cfg.aiKey || '');
-  $('#key').value = cfg.key || ''; $('#cx').value = cfg.cx || '';
+  $('#aiKey').value = cfg.aiKey || ''; $('#key').value = cfg.key || ''; $('#cx').value = cfg.cx || '';
   $('#dlg').showModal();
 };
 $('#save').onclick = () => {
