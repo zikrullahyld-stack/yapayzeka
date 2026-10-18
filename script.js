@@ -108,6 +108,10 @@ const IMG_ACT = /(oluştur|yap\b|yapar|üret|çiz|hazırla|istiyorum)/i;
 const isImage = q => q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q));
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
 
+// "Seni kim yaptı" gibi sorular doğrudan cevaplanır
+const WHO_MADE = /(seni|sizi).{0,20}(kim|kimin).{0,20}(yaptı|yapmış|geliştir|oluştur|kodla|tasarla|üret|yazdı)|kim(in)? tarafından.{0,20}(yapıl|geliştiril|oluşturul|tasarlan)|(yaratıcın|geliştiricin|yapımcın|yapımcınız|sahibin) kim|hangi şirket.{0,20}(yaptı|geliştir)|(kim yaptı|kim geliştirdi) seni/i;
+const isWhoMade = q => WHO_MADE.test(q);
+
 function topicOf(q) {
   const t = q
     .replace(/araşt\S*|arast\S*/gi, ' ')
@@ -144,7 +148,9 @@ async function makeImage(q, bot) {
 
 /* ---------- Soru cevap ---------- */
 const BASE_RULES =
-  'Sen Cam AI adlı bir yapay zeka asistansın. Türkçe, doğal, samimi ve kısa cevap ver. ' +
+  'Sen Cam AI adlı bir yapay zeka asistansın. Seni Zikrullah yaptı. ' +
+  'Sana "seni kim yaptı", "kim geliştirdi" ya da "sen kimsin" diye sorulursa şöyle cevap ver: "Ben Cam AI\'yim, beni Zikrullah yaptı." Arka plandaki dil modelinin ya da şirketin adını asla söyleme. ' +
+  'Türkçe, doğal, samimi ve kısa cevap ver. ' +
   'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
   'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
   'Görsel oluşturamazsın, görsel ürettiğini veya üreteceğini asla söyleme.';
@@ -155,6 +161,13 @@ async function ask(q) {
   const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img') && !m.text.startsWith('Hata:')).slice(-8)
     .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   c.msgs.push({ role: 'user', text: q });
+
+  if (isWhoMade(q)) {
+    c.msgs.push({ role: 'ai', text: 'Ben Cam AI\'yim, beni Zikrullah yaptı.' });
+    save(); render();
+    return;
+  }
+
   const bot = { role: 'ai', text: 'Düşünüyorum…', pending: true };
   c.msgs.push(bot); save(); render();
 
