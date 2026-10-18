@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yapay Zeka Asistanı</title>
+    <!-- CSS Dosyamızı Bağlıyoruz -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Sol Yan Menü (Sohbet Geçmişi ve Yeni Sohbet Butonu) -->
+    <div class="sidebar">
+        <button class="new-chat-btn" onclick="startNewChat()">
+            <span>+</span> Yeni Sohbet
+        </button>
+        <div class="chat-history" id="chatHistory">
+            <!-- Geçmiş sohbetler buraya eklenecek -->
+        </div>
+    </div>
+
+    <!-- Ana Sohbet Alanı -->
+    <div class="main-chat">
+        <div class="chat-header">Yapay Zeka Asistanı</div>
+        
+        <div class="chat-messages" id="chatMessages">
+            <!-- Mesajlar buraya eklenecek -->
+        </div>
+
+        <!-- Mesaj Yazma Kutusu -->
+        <div class="input-container">
+            <div class="input-box">
+                <textarea id="userInput" rows="1" placeholder="Bir mesaj yazın veya resim isteyin (Örn: resim yap araba)..." onkeydown="handleKeyDown(event)"></textarea>
+                <button class="send-btn" onclick="sendMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Dosyamızı Bağlıyoruz -->
+    <script src="script.js"></script>
+</body>
+</html>
