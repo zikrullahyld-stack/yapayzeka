@@ -3,40 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yapay Zeka Asistanı</title>
-    <!-- CSS Dosyamızı Bağlıyoruz -->
+    <title>ChatGPT</title>
     <link rel="stylesheet" href="style.css">
+    <!-- FontAwesome İkonları -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
 
-    <!-- Sol Yan Menü (Sohbet Geçmişi ve Yeni Sohbet Butonu) -->
+    <!-- Sol Menü (Sidebar) -->
     <div class="sidebar">
-        <button class="new-chat-btn" onclick="startNewChat()">
-            <span>+</span> Yeni Sohbet
+        <div class="sidebar-header">
+            <div class="brand"><i class="fa-solid fa-bolt"></i> ChatGPT</div>
+            <button class="icon-btn" title="Menüyü Kapat"><i class="fa-regular fa-window-maximize"></i></button>
+        </div>
+
+        <button class="nav-item new-chat" onclick="startNewChat()">
+            <i class="fa-regular fa-pen-to-square"></i>
+            <span>Yeni sohbet</span>
         </button>
-        <div class="chat-history" id="chatHistory">
-            <!-- Geçmiş sohbetler buraya eklenecek -->
+
+        <div class="nav-menu">
+            <div class="nav-item"><i class="fa-regular fa-image"></i> <span>Görselleştirme</span></div>
+            <div class="nav-item"><i class="fa-solid fa-border-all"></i> <span>Eklentiler</span></div>
+            <div class="nav-item"><i class="fa-solid fa-compass"></i> <span>Derin araştırma</span></div>
+            <div class="nav-item"><i class="fa-regular fa-compass"></i> <span>Planlara ve ücretlere göz at</span> <i class="fa-solid fa-arrow-up-right-from-square external-icon"></i></div>
+            <div class="nav-item"><i class="fa-regular fa-circle-question"></i> <span>Yardım</span> <i class="fa-solid fa-arrow-up-right-from-square external-icon"></i></div>
+            <div class="nav-item"><i class="fa-solid fa-gear"></i> <span>Ayarlar</span></div>
+        </div>
+
+        <div class="sidebar-history" id="chatHistory">
+            <!-- Sohbet geçmişi buraya listelenecek -->
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="promo-box">
+                <strong>Sana özel yanıtlar al</strong>
+                <p>Kaydedilen sohbetlere göre cevaplar almak, görseller oluşturmak ve dosyalar yüklemek için oturum aç.</p>
+            </div>
+            <button class="login-btn-full">Oturum aç</button>
         </div>
     </div>
 
     <!-- Ana Sohbet Alanı -->
-    <div class="main-chat">
-        <div class="chat-header">Yapay Zeka Asistanı</div>
-        
-        <div class="chat-messages" id="chatMessages">
-            <!-- Mesajlar buraya eklenecek -->
+    <div class="main-content">
+        <!-- Üst Bar -->
+        <div class="top-bar">
+            <div class="model-selector">
+                <span>ChatGPT</span> <i class="fa-solid fa-chevron-down"></i>
+            </div>
+            <div class="auth-buttons">
+                <button class="btn-login">Oturum aç</button>
+                <button class="btn-signup">Ücretsiz kaydol</button>
+            </div>
         </div>
 
-        <!-- Mesaj Yazma Kutusu -->
-        <div class="input-container">
+        <!-- Mesaj Akışı -->
+        <div class="chat-container" id="chatMessages">
+            <!-- Mesajlar dinamik eklenecek -->
+        </div>
+
+        <!-- Alt Giriş Kutusu -->
+        <div class="input-wrapper">
             <div class="input-box">
-                <textarea id="userInput" rows="1" placeholder="Bir mesaj yazın veya resim isteyin (Örn: resim yap araba)..." onkeydown="handleKeyDown(event)"></textarea>
-                <button class="send-btn" onclick="sendMessage()">➤</button>
+                <button class="input-action-btn"><i class="fa-solid fa-plus"></i></button>
+                <textarea id="userInput" rows="1" placeholder="ChatGPT'ye sor" onkeydown="handleKeyDown(event)"></textarea>
+                <button class="input-action-btn"><i class="fa-solid fa-microphone"></i></button>
+                <button class="send-btn" onclick="sendMessage()"><i class="fa-solid fa-arrow-up"></i></button>
             </div>
         </div>
     </div>
 
-    <!-- JavaScript Dosyamızı Bağlıyoruz -->
     <script src="script.js"></script>
 </body>
 </html>
