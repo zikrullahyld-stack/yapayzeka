@@ -38,10 +38,11 @@ body{font-family:"Segoe UI",system-ui,sans-serif;color:var(--ink);background:#0a
 .msg h3{font-size:.95rem;margin:12px 0 6px;color:var(--acc)}
 .msg a{color:var(--acc);text-decoration:none}.msg a:hover{text-decoration:underline}
 .src{margin:6px 0;white-space:normal}
-.src small{display:block;color:var(--mut)}
 .hello{margin:auto;text-align:center;color:var(--mut);max-width:420px}
 .hello b{display:block;font-size:1.6rem;color:var(--ink);margin-bottom:8px}
-.composer{display:flex;gap:10px;padding:16px 20px;border-top:1px solid var(--edge)}
+.composer{display:flex;align-items:center;gap:10px;padding:16px 20px;border-top:1px solid var(--edge)}
+.toggle{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:.85rem;white-space:nowrap;cursor:pointer}
+.toggle input{width:auto;accent-color:#6ee7e0}
 dialog{margin:auto;border:1px solid var(--edge);border-radius:24px;background:rgba(18,26,60,.8);backdrop-filter:blur(30px);color:var(--ink);padding:0;width:min(440px,92vw)}
 dialog::backdrop{background:rgba(5,8,25,.6)}
 .dlg{display:flex;flex-direction:column;gap:12px;padding:24px}
@@ -51,5 +52,6 @@ dialog::backdrop{background:rgba(5,8,25,.6)}
  .app{grid-template-columns:1fr;padding:8px;gap:0}
  .side{position:fixed;inset:8px 25% 8px 8px;z-index:5;transform:translateX(-110%);transition:transform .25s;background:rgba(14,22,56,.9)}
  .side.open{transform:none}.menu{display:block}.msg{max-width:94%}
+ .toggle{font-size:.75rem}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
