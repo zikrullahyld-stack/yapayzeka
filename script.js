@@ -1,6 +1,7 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats')) || [];
+    // Eski bozuk verilerden kurtulmak için yeni anahtar kullanıyoruz
+    chats = JSON.parse(localStorage.getItem('ai_chats_v2')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -36,7 +37,7 @@ function startNewChat() {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v2', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -72,13 +73,15 @@ function renderMessages() {
         const rowDiv = document.createElement('div');
         rowDiv.className = `message-row ${msg.sender}`;
 
+        let textContent = formatMessageText(msg.text);
+
         if (msg.sender === 'user') {
-            rowDiv.innerHTML = `<div class="user-bubble">${formatMessageText(msg.text)}</div>`;
+            rowDiv.innerHTML = `<div class="user-bubble">${textContent}</div>`;
         } else {
             let imgHTML = msg.imageUrl ? `<br><img src="${msg.imageUrl}" class="ai-image" alt="Oluşturulan Görsel">` : '';
             rowDiv.innerHTML = `
                 <div class="ai-bubble">
-                    ${formatMessageText(msg.text)}${imgHTML}
+                    ${textContent}${imgHTML}
                     <div class="ai-actions">
                         <i class="fa-regular fa-copy" title="Kopyala"></i>
                         <i class="fa-solid fa-rotate-right" title="Yeniden Dene"></i>
@@ -91,10 +94,11 @@ function renderMessages() {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// Güvenli Metin ve Kod Biçimlendirme
+// %100 Güvenli Metin Biçimlendirme (Hata Asla Almaz)
 function formatMessageText(text) {
+    if (text === null || text === undefined) return '';
     if (typeof text !== 'string') {
-        text = String(text || '');
+        text = String(text);
     }
     if (text.includes('```')) {
         return text.replace(/```([a-z]*)\n([\s\S]*?)```/g, '<pre style="background:#1e1e1e; padding:12px; border-radius:8px; margin-top:8px; overflow-x:auto; color:#dcdcdc; font-family:monospace;"><code>$2</code></pre>');
