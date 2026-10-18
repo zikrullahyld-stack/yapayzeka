@@ -1,6 +1,5 @@
 let chats = [];
 try {
-    // Eski bozuk verilerden kurtulmak için yeni anahtar kullanıyoruz
     chats = JSON.parse(localStorage.getItem('ai_chats_v2')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
@@ -94,9 +93,12 @@ function renderMessages() {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// %100 Güvenli Metin Biçimlendirme (Hata Asla Almaz)
+// Güvenli Metin Biçimlendirme
 function formatMessageText(text) {
     if (text === null || text === undefined) return '';
+    if (typeof text === 'object') {
+        text = text.text || JSON.stringify(text);
+    }
     if (typeof text !== 'string') {
         text = String(text);
     }
@@ -137,15 +139,11 @@ function sendMessage() {
 
     // Yapay Zeka Yanıt Simülasyonu
     setTimeout(() => {
-        let aiResponse = generateAIResponse(text);
-        let imageUrl = null;
+        let aiResult = generateAIResponse(text);
+        let aiText = typeof aiResult === 'object' ? aiResult.text : aiResult;
+        let imageUrl = typeof aiResult === 'object' ? aiResult.imageUrl : null;
 
-        if (aiResponse.imageUrl) {
-            imageUrl = aiResponse.imageUrl;
-            aiResponse = aiResponse.text;
-        }
-
-        currentChat.messages.push({ sender: 'ai', text: aiResponse, imageUrl: imageUrl });
+        currentChat.messages.push({ sender: 'ai', text: aiText, imageUrl: imageUrl });
         saveChats();
         renderMessages();
     }, 600);
