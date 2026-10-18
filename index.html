@@ -5,25 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yapay Zeka</title>
 
-    <!-- 2. Hatanın Çözümü: Sekme İkonu (Favicon) -->
+    <!-- Kırmızı Favicon Hatasının Çözümü (Sekme İkonu) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
 
     <link rel="stylesheet" href="style.css">
-
-    <!-- 1. Hatanın Çözümü: FontAwesome Anonim Yükleme -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
 
     <!-- Sol Menü (Sidebar) -->
     <div class="sidebar">
         <div class="sidebar-header">
-            <div class="brand"><i class="fa-solid fa-robot"></i> Yapay Zeka</div>
+            <div class="brand">🤖 Yapay Zeka</div>
         </div>
 
         <button class="nav-item new-chat" onclick="startNewChat()">
-            <i class="fa-regular fa-pen-to-square"></i>
-            <span>Yeni sohbet</span>
+            <span>✏️ Yeni sohbet</span>
         </button>
 
         <div class="history-title">Sohbet Geçmişi</div>
@@ -41,13 +37,13 @@
         </div>
 
         <div class="chat-container" id="chatMessages">
-            <!-- Mesajlar eklenecek -->
+            <!-- Mesajlar dinamik eklenecek -->
         </div>
 
         <div class="input-wrapper">
             <div class="input-box">
                 <textarea id="userInput" rows="1" placeholder="Yapay Zeka'ya bir şeyler sor..." onkeydown="handleKeyDown(event)"></textarea>
-                <button class="send-btn" onclick="sendMessage()"><i class="fa-solid fa-arrow-up"></i></button>
+                <button class="send-btn" onclick="sendMessage()">⬆</button>
             </div>
         </div>
     </div>
