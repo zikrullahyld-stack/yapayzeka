@@ -1,6 +1,6 @@
 let chats = [];
 try {
-    chats = JSON.parse(localStorage.getItem('ai_chats_v4')) || [];
+    chats = JSON.parse(localStorage.getItem('ai_chats_v5')) || [];
     if (!Array.isArray(chats)) chats = [];
 } catch (e) {
     chats = [];
@@ -25,7 +25,7 @@ function startNewChat() {
         id: currentChatId,
         title: 'Yeni sohbet',
         messages: [
-            { sender: 'ai', text: 'Merhaba! Ben sana yardımcı olmak için tasarlanmış bir Yapay Zeka asistanıyım. Bana soru sorabilir, kod yazdırabilir veya resim yaptırabilirsin! 🤖✨', imageUrl: null }
+            { sender: 'ai', text: 'Merhaba! Ben akıllı Yapay Zeka asistanınızım. Bana matematik işlemleri sorabilir, kod yazdırabilir veya resim yaptırabilirsiniz! 🤖✨', imageUrl: null }
         ]
     };
     chats.unshift(newChat);
@@ -36,7 +36,7 @@ function startNewChat() {
 
 // Sohbet Silme Fonksiyonu
 function deleteChat(id, event) {
-    event.stopPropagation(); // Sohbet yükleme tetiklenmesini engeller
+    event.stopPropagation();
     chats = chats.filter(chat => chat.id !== id);
     saveChats();
     
@@ -53,7 +53,7 @@ function deleteChat(id, event) {
 
 // Sohbetleri Tarayıcıya Kaydetme
 function saveChats() {
-    localStorage.setItem('ai_chats_v4', JSON.stringify(chats));
+    localStorage.setItem('ai_chats_v5', JSON.stringify(chats));
 }
 
 // Geçmiş Sohbetleri Ekrana Listeleme
@@ -161,76 +161,92 @@ function sendMessage() {
         currentChat.messages.push({ sender: 'ai', text: aiResult.text, imageUrl: aiResult.imageUrl });
         saveChats();
         renderMessages();
-    }, 500);
+    }, 400);
 }
 
-// Akıllı ve Güvenli Cevap Motoru
+// Gelişmiş Akıllı Cevap Motoru (Matematik, Kod, Resim ve Sohbet)
 function generateAIResponse(query) {
     const lower = query.toLowerCase();
 
-    // 1. Kötü / Yasadışı İçi̇erik Kontrolü (Güvenlik Filtresi)
-    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet', 'zarar ver'];
+    // 1. Matematik İşlemlerini Çözme (Örn: 9x9, 5+5, 10/2)
+    let cleanMath = lower.replace(/x/g, '*').replace(/×/g, '*').replace(/[:]/g, '/');
+    // Eğer içinde rakam ve matematiksel operatör geçiyorsa hesaplamaya çalış
+    if (/[\d]+\s*[\+\-\*\/\\]\s*[\d]+/.test(cleanMath)) {
+        try {
+            let mathExpr = cleanMath.replace(/[^0-9+\-*/().]/g, '');
+            let result = Function('"use strict";return (' + mathExpr + ')')();
+            if (!isNaN(result)) {
+                return {
+                    text: `Matematik işleminin sonucu: **${result}** 🧮`,
+                    imageUrl: null
+                };
+            }
+        } catch (e) {}
+    }
+
+    // 2. Güvenlik Filtresi (Kötü/Yasadışı İçerik)
+    const illegalKeywords = ['hack', 'virüs', 'patlayıcı', 'bomba', 'silah yapımı', 'saldırı', 'çalma', 'uyuşturucu', 'küfür', 'şiddet'];
     for (let word of illegalKeywords) {
         if (lower.includes(word)) {
             return {
-                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı, zararlı veya güvenliği tehdit eden konularda yanıt veremem. Lütfen başka bir konuda soru sorun.",
+                text: "⚠️ **Güvenlik Uyarısı:** Ben etik kurallara bağlı bir yapay zeka asistanıyım. Yasadışı veya zararlı konularda yanıt veremem.",
                 imageUrl: null
             };
         }
     }
 
-    // 2. Resim / Görsel Oluşturma
+    // 3. Resim / Görsel Oluşturma
     if (lower.includes('resim yap') || lower.includes('görsel oluştur') || lower.includes('çiz') || lower.includes('resmini çiz')) {
-        const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'beautiful landscape');
+        const prompt = encodeURIComponent(query.replace(/resim yap|görsel oluştur|çiz|resmini çiz/gi, '').trim() || 'futuristic art');
         return {
-            text: `İstediğin görseli senin için tasarladım:`,
+            text: `İstediğin görseli senin için oluşturdum:`,
             imageUrl: `[https://image.pollinations.ai/prompt/$](https://image.pollinations.ai/prompt/$){prompt}`
         };
     }
 
-    // 3. Kod Yazma İstekleri
+    // 4. Kod Yazma İstekleri
     if (lower.includes('kod') || lower.includes('html') || lower.includes('css') || lower.includes('javascript') || lower.includes('python')) {
         return {
-            text: `İstediğin konuyla ilgili örnek kod bloğu aşağıdadır:\n\n\`\`\`javascript\n// Yapay Zeka Kod Örneği\nfunction selamla(isim) {\n    return "Merhaba " + isim + ", web sitemize hoş geldin!";\n}\n\nconsole.log(selamla("Kullanıcı"));\n\`\`\``,
+            text: `İstediğin programlama diliyle ilgili örnek kod bloğu:\n\n\`\`\`javascript\n// Örnek Kod\nconsole.log("Proje ödevi başarıyla çalışıyor!");\n\`\`\``,
             imageUrl: null
         };
     }
 
-    // 4. Selamlaşma ve Tanışma
-    if (lower.includes('merhaba') || lower.includes('selam') || lower.includes('sa') || lower.includes('günaydın')) {
+    // 5. Selamlaşma
+    if (lower.includes('merhaba') || lower.includes('selam') || lower.includes('günaydın') || lower.includes('sa')) {
         return {
-            text: "Merhaba! 👋 Size nasıl yardımcı olabilirim? Herhangi bir soru sorabilir, kod isteyebilir veya resim çizdirebilirsiniz.",
+            text: "Aleykümselam! 👋 Bugün size hangi konuda yardımcı olabilirim?",
             imageUrl: null
         };
     }
 
-    // 5. Hal Hatır Sorma
+    // 6. Hal Hatır
     if (lower.includes('nasılsın') || lower.includes('nasıl gidiyor')) {
         return {
-            text: "Ben bir yapay zeka olduğum için duygularım yok ama harika çalışıyorum! Siz nasılsınız?",
+            text: "Teşekkür ederim, gayet iyiyim ve projeniz için çalışmaya hazırım! Siz nasılsınız?",
             imageUrl: null
         };
     }
 
-    // 6. Kimsin / Sen Nesin?
-    if (lower.includes('sen kimsin') || lower.includes('adın ne') || lower.includes('kim yaptı')) {
+    // 7. Kimsin / Ne işe yarırsın
+    if (lower.includes('kimsin') || lower.includes('adın ne') || lower.includes('ne yapabiliyorsun')) {
         return {
-            text: "Ben HTML, CSS ve JavaScript teknolojileri kullanılarak geliştirilmiş akıllı bir Yapay Zeka asistanıyım.",
+            text: "Ben HTML, CSS ve JavaScript ile geliştirilmiş özel bir Yapay Zeka proje asistanıyım. Soru sorabilir, matematik hesabı yaptırabilir, kod yazdırabilir ve görsel üretebilirsiniz.",
             imageUrl: null
         };
     }
 
-    // 7. Bilim ve Genel Kültür
-    if (lower.includes('nedir') || lower.includes('ne demek') || lower.includes('nasıl çalışır') || lower.includes('bilgi')) {
+    // 8. Matematik / Ders Soruları Genel
+    if (lower.includes('matematik') || lower.includes('ders') || lower.includes('soru')) {
         return {
-            text: `"${query}" konusu hakkında detaylı bilgi: Bu konu bilimsel ve teknik açıdan oldukça önemlidir. Sistemlerin düzenli çalışmasını sağlar ve modern teknolojide geniş bir kullanım alanına sahiptir.`,
+            text: `Tabii ki! Matematik veya derslerinizle ilgili soruyu doğrudan yazabilirsiniz (Örn: \`15*4\` veya \`100/5\` gibi), hemen hesaplayıp yardımcı olayım.`,
             imageUrl: null
         };
     }
 
-    // Genel Cevap Motoru
+    // Genel Akıllı Yanıt
     return {
-        text: `"${query}" hakkında harika bir soru! Bu konuda size yardımcı olabilirim. Daha detaylı açıklama yapmamı veya bununla ilgili bir kod/görsel üretmemi ister misiniz?`,
+        text: `"${query}" konusunu inceledim. Bu konuda size yardımcı olmaktan mutluluk duyarım. Daha fazla detay vermemi veya bununla ilgili işlem yapmamı ister misiniz?`,
         imageUrl: null
     };
 }
