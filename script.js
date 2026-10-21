@@ -88,22 +88,38 @@ async function wikiSearch(q) {
     .filter(p => p.text.length > 40);
 }
 
-/* ---------- Yapay zeka (OpenAI uyumlu API) ---------- */
+/* ---------- Yapay zeka (boş cevap gelirse başka model dener) ---------- */
 async function callAI(messages) {
   const url = hasKey() ? 'https://gen.pollinations.ai/v1/chat/completions' : 'https://text.pollinations.ai/openai';
   const headers = { 'Content-Type': 'application/json' };
   if (hasKey()) headers.Authorization = 'Bearer ' + cfg.aiKey;
-  const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model: 'openai', messages }) });
-  const raw = await r.text();
-  if (!r.ok) throw new Error(`Yapay zeka hizmeti hata verdi (${r.status}). ${raw.slice(0, 200)}`);
-  let d; try { d = JSON.parse(raw); } catch { throw new Error('Geçersiz cevap geldi.'); }
-  const out = d.choices?.[0]?.message?.content;
-  if (!out) throw new Error('Boş cevap geldi.');
-  return out;
+
+  let lastErr = '';
+  for (const model of ['openai', 'gemini', 'openai-fast']) {
+    try {
+      const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages }) });
+      const raw = await r.text();
+      if (!r.ok) {
+        lastErr = `(${r.status}) ${raw.slice(0, 150)}`;
+        if ([401, 402, 403, 429].includes(r.status)) break;
+        continue;
+      }
+      let d;
+      try { d = JSON.parse(raw); } catch { lastErr = 'Geçersiz cevap geldi.'; continue; }
+      const choice = d.choices?.[0];
+      const c = choice?.message?.content;
+      let out = typeof c === 'string' ? c : Array.isArray(c) ? c.map(p => p.text || '').join('') : '';
+      out = (out || '').trim();
+      if (out) return out;
+      lastErr = `${model} boş cevap verdi (${choice?.finish_reason || 'sebep belirtilmedi'}).`;
+    } catch (e) {
+      lastErr = e.message;
+    }
+  }
+  throw new Error('Yapay zeka cevap veremedi. ' + lastErr);
 }
 
 /* ---------- Mesaj türünü belirleme ---------- */
-// "resim", "resmi", "fotoğrafı", "görseli" gibi çekimleri de yakalar
 const IMG_HINT = /(resim|resm|fotoğraf|fotograf|foto\b|görsel|gorsel|logo|çiz|illüstrasyon|poster|duvar kağıdı)/i;
 const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiyorum|ver\b|göster|olsun)/i;
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
@@ -274,4 +290,4 @@ $('#save').onclick = () => {
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v4';
+document.title = 'Cam AI v5';
