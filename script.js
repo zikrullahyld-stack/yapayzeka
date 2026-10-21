@@ -7,8 +7,8 @@ const store = {
 const DEFAULTS = {
   aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',
   pixabayKey: '58156341-813AE128f4626ff9b23e2d30e',
-  key: '',
-  cx: ''
+  key: '',   // Google API anahtarı (isteğe bağlı, görsel aramayı Google'a da açar)
+  cx: ''     // Google arama motoru kimliği (isteğe bağlı)
 };
 
 let chats = store.get('camai.chats', []);
@@ -62,7 +62,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "pitbull resmi göster" yazabilirsin.</div>';
+    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "siyah pitbull resmi göster" yazabilirsin.</div>';
     return;
   }
   box.innerHTML = '';
@@ -123,22 +123,9 @@ async function callAI(messages) {
 
 /* ---------- Mesaj türünü belirleme ---------- */
 const IMG_HINT = /(resim|resm|fotoğraf|fotograf|foto\b|görsel|gorsel|logo|çizim|illüstrasyon|poster|duvar kağıdı)/i;
-const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiyorum|ver\b|göster|bul\b|olsun)/i;
+const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiyorum|ver\b|göster|bul\b|olsun|at\b|getir)/i;
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
-
-async function wantsImage(q) {
-  if (/^\/resim/i.test(q)) return true;
-  if (!IMG_HINT.test(q)) return false;
-  try {
-    const out = await callAI([
-      { role: 'system', content: 'Kullanıcı bir görsel, resim veya fotoğraf GÖSTERİLMESİNİ ya da BULUNMASINI mı istiyor? Sadece soru soruyor, bilgi istiyor ya da sohbet ediyorsa HAYIR. Sadece EVET veya HAYIR yaz.' },
-      { role: 'user', content: q }
-    ]);
-    return /evet/i.test(out);
-  } catch (e) {
-    return IMG_ACT.test(q);
-  }
-}
+const wantsImage = q => /^\/resim/i.test(q) || (IMG_HINT.test(q) && IMG_ACT.test(q));
 
 // "Seni kim yaptı" gibi sorular doğrudan cevaplanır
 const WHO_MADE = /(seni|sizi).{0,20}(kim|kimin).{0,20}(yaptı|yapmış|geliştir|oluştur|kodla|tasarla|üret|yazdı)|kim(in)? tarafından.{0,20}(yapıl|geliştiril|oluşturul|tasarlan)|(yaratıcın|geliştiricin|yapımcın|yapımcınız|sahibin) kim|hangi şirket.{0,20}(yaptı|geliştir)|(kim yaptı|kim geliştirdi) seni|kim yaptı|kim geliştirdi/i;
@@ -153,53 +140,92 @@ function topicOf(q) {
   return t || q;
 }
 
-/* ---------- Görsel arama (Pixabay) ---------- */
+/* ---------- Görsel arama: Pixabay -> Google (anahtar girildiyse) -> Vikimedia ---------- */
 function imageTopic(q) {
   const t = q
     .replace(/^\/resim/i, ' ')
-    .replace(/\S*(resim|resm|fotoğraf|fotograf|görsel|gorsel|oluştur|olustur|göster|çiz|üret|hazırla|yap|bul|ver|istiyorum|olsun)\S*/gi, ' ')
+    .replace(/\S*(resim|resm|fotoğraf|fotograf|görsel|gorsel|oluştur|olustur|göster|çiz|üret|hazırla|yap|bul|ver|istiyorum|olsun|getir)\S*/gi, ' ')
     .replace(/(^|\s)(bana|lütfen|bir|bi|şu|bu|için|kafana|göre)(?=\s|$)/gi, ' ')
     .replace(/[?!.,]/g, ' ')
     .replace(/\s+/g, ' ').trim();
   return t || q;
 }
 
+async function pixabaySearch(query) {
+  const url = 'https://pixabay.com/api/?key=' + encodeURIComponent(cfg.pixabayKey) +
+    '&q=' + encodeURIComponent(query.slice(0, 100)) +
+    '&image_type=all&safesearch=true&per_page=6&order=popular';
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Pixabay ' + r.status);
+  const d = await r.json();
+  return (d.hits || []).slice(0, 4).map(h => ({ img: h.webformatURL, link: h.pageURL, alt: h.tags || query }));
+}
+
+async function googleImageSearch(query) {
+  if (!cfg.key || !cfg.cx) return [];
+  const url = 'https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(cfg.key) +
+    '&cx=' + encodeURIComponent(cfg.cx) + '&searchType=image&num=4&safe=active&q=' + encodeURIComponent(query);
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Google ' + r.status);
+  const d = await r.json();
+  return (d.items || []).slice(0, 4).map(i => ({
+    img: i.image?.thumbnailLink || i.link,
+    link: i.image?.contextLink || i.link,
+    alt: i.title || query
+  }));
+}
+
+async function commonsSearch(query) {
+  const url = 'https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6' +
+    '&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=640&format=json&origin=*&gsrsearch=' + encodeURIComponent(query);
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Vikimedia ' + r.status);
+  const d = await r.json();
+  return Object.values(d.query?.pages || {})
+    .map(p => p.imageinfo?.[0])
+    .filter(i => i && /\.(jpe?g|png)$/i.test(i.url || ''))
+    .slice(0, 4)
+    .map(i => ({ img: i.thumburl || i.url, link: i.descriptionurl, alt: query }));
+}
+
 async function searchImages(q) {
   let query = imageTopic(q);
   try {
-    // Pixabay İngilizce aramada daha iyi sonuç verir, yapay zeka çevirir
     const en = await callAI([
       { role: 'system', content: 'Kullanıcının istediği görseli stok fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz, başka hiçbir şey yazma.' },
       { role: 'user', content: q }
     ]);
     const clean = en.replace(/["\n.]/g, ' ').trim();
-    if (clean && clean.length <= 60) query = clean;
+    if (clean && clean.length <= 60 && !/[{}]/.test(clean)) query = clean;
   } catch (e) { console.warn(e); }
 
-  const url = 'https://pixabay.com/api/?key=' + encodeURIComponent(cfg.pixabayKey) +
-    '&q=' + encodeURIComponent(query.slice(0, 100)) +
-    '&image_type=all&safesearch=true&per_page=6&order=popular';
-  const r = await fetch(url);
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(`Pixabay hata verdi (${r.status}). ${t.slice(0, 150)}`);
+  const providers = [
+    ['Pixabay', pixabaySearch],
+    ['Google', googleImageSearch],
+    ['Vikimedia Commons', commonsSearch]
+  ];
+  for (const [name, fn] of providers) {
+    try {
+      const hits = await fn(query);
+      if (hits.length) return { query, hits, source: name };
+    } catch (e) { console.warn(name, e); }
   }
-  const d = await r.json();
-  return { query, hits: (d.hits || []).slice(0, 4) };
+  return { query, hits: [], source: '' };
 }
 
 async function showImages(q, bot) {
-  const { query, hits } = await searchImages(q);
+  const { query, hits, source } = await searchImages(q);
+  const gLink = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(query);
   if (!hits.length) {
-    bot.text = `"${query}" için görsel bulamadım. Başka kelimelerle dene.`;
-    delete bot.html;
+    bot.text = `"${query}" için uygun görsel bulamadım.`;
+    bot.html = `"${esc(query)}" için uygun görsel bulamadım. <a href="${esc(gLink)}" target="_blank" rel="noopener">Google Görseller'de aç</a>`;
     return;
   }
   bot.text = `Görsel arama: ${query}`;
   bot.html = 'İşte "' + esc(query) + '" için bulduğum görseller:' +
     '<div class="gallery">' +
-    hits.map(h => `<a href="${esc(h.pageURL)}" target="_blank" rel="noopener"><img src="${esc(h.webformatURL)}" alt="${esc(h.tags || query)}" loading="lazy"></a>`).join('') +
-    '</div><div class="credit">Görseller: <a href="https://pixabay.com" target="_blank" rel="noopener">Pixabay</a></div>';
+    hits.map(h => `<a href="${esc(h.link)}" target="_blank" rel="noopener"><img src="${esc(h.img)}" alt="${esc(h.alt)}" loading="lazy"></a>`).join('') +
+    '</div><div class="credit">Kaynak: ' + esc(source) + ' · <a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de daha fazla</a></div>';
 }
 
 /* ---------- Soru cevap ---------- */
@@ -209,7 +235,7 @@ const BASE_RULES =
   'Türkçe, doğal, samimi ve kısa cevap ver. ' +
   'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
   'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
-  'Görsel isteklerini site senin yerine otomatik karşılar, bu yüzden "görsel oluşturamam" deme ve özür dileme.';
+  'Asla JSON, kod bloğu ya da araç çağrısı yazma. Sadece düz Türkçe metinle cevap ver.';
 
 async function ask(q) {
   const c = current() || (newChat(), current());
@@ -228,7 +254,7 @@ async function ask(q) {
   c.msgs.push(bot); save(); render();
 
   try {
-    if (await wantsImage(q)) {
+    if (wantsImage(q)) {
       bot.text = 'Görseller aranıyor…'; renderMsgs();
       await showImages(q, bot);
     } else {
@@ -248,6 +274,15 @@ async function ask(q) {
       }
       bot.text = 'Cevap yazılıyor…'; renderMsgs();
       let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
+
+      // Yapay zeka yine de sahte resim komutu yazarsa, görsel aramaya çevir
+      if (/text-to-image|"prompt"\s*:/i.test(answer)) {
+        bot.text = 'Görseller aranıyor…'; renderMsgs();
+        await showImages(q, bot);
+        delete bot.pending; save(); render();
+        return;
+      }
+
       if (!/open\s?ai|chat\s?gpt|gpt/i.test(q)) {
         answer = answer.replace(/open\s?ai|chat\s?gpt/gi, 'Zikrullah');
       }
@@ -287,4 +322,4 @@ $('#save').onclick = () => {
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v6';
+document.title = 'Cam AI v7';
