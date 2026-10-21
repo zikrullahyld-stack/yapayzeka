@@ -6,6 +6,7 @@ const store = {
 
 const DEFAULTS = {
   aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',
+  pixabayKey: '58156341-813AE128f4626ff9b23e2d30e',
   key: '',
   cx: ''
 };
@@ -14,6 +15,7 @@ let chats = store.get('camai.chats', []);
 let saved = store.get('camai.cfg', {});
 let cfg = {
   aiKey: saved.aiKey || DEFAULTS.aiKey,
+  pixabayKey: DEFAULTS.pixabayKey,
   key: saved.key || DEFAULTS.key,
   cx: saved.cx || DEFAULTS.cx
 };
@@ -60,7 +62,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "kedi resmi oluştur" yazabilirsin.</div>';
+    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "pitbull resmi göster" yazabilirsin.</div>';
     return;
   }
   box.innerHTML = '';
@@ -120,8 +122,8 @@ async function callAI(messages) {
 }
 
 /* ---------- Mesaj türünü belirleme ---------- */
-const IMG_HINT = /(resim|resm|fotoğraf|fotograf|foto\b|görsel|gorsel|logo|çiz|illüstrasyon|poster|duvar kağıdı)/i;
-const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiyorum|ver\b|göster|olsun)/i;
+const IMG_HINT = /(resim|resm|fotoğraf|fotograf|foto\b|görsel|gorsel|logo|çizim|illüstrasyon|poster|duvar kağıdı)/i;
+const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiyorum|ver\b|göster|bul\b|olsun)/i;
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
 
 async function wantsImage(q) {
@@ -129,7 +131,7 @@ async function wantsImage(q) {
   if (!IMG_HINT.test(q)) return false;
   try {
     const out = await callAI([
-      { role: 'system', content: 'Kullanıcı yeni bir görsel, resim, fotoğraf veya logo ÜRETİLMESİNİ mi istiyor? Sadece soru soruyor, bilgi istiyor ya da sohbet ediyorsa HAYIR. Sadece EVET veya HAYIR yaz.' },
+      { role: 'system', content: 'Kullanıcı bir görsel, resim veya fotoğraf GÖSTERİLMESİNİ ya da BULUNMASINI mı istiyor? Sadece soru soruyor, bilgi istiyor ya da sohbet ediyorsa HAYIR. Sadece EVET veya HAYIR yaz.' },
       { role: 'user', content: q }
     ]);
     return /evet/i.test(out);
@@ -151,58 +153,53 @@ function topicOf(q) {
   return t || q;
 }
 
-/* ---------- Görsel üretimi ---------- */
-async function shrink(blob) {
-  const bmp = await createImageBitmap(blob);
-  const s = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
-  const cv = document.createElement('canvas');
-  cv.width = Math.round(bmp.width * s);
-  cv.height = Math.round(bmp.height * s);
-  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
-  return cv.toDataURL('image/jpeg', 0.82);
+/* ---------- Görsel arama (Pixabay) ---------- */
+function imageTopic(q) {
+  const t = q
+    .replace(/^\/resim/i, ' ')
+    .replace(/\S*(resim|resm|fotoğraf|fotograf|görsel|gorsel|oluştur|olustur|göster|çiz|üret|hazırla|yap|bul|ver|istiyorum|olsun)\S*/gi, ' ')
+    .replace(/(^|\s)(bana|lütfen|bir|bi|şu|bu|için|kafana|göre)(?=\s|$)/gi, ' ')
+    .replace(/[?!.,]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return t || q;
 }
 
-async function fetchImage(prompt, model) {
-  const base = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) +
-    '?model=' + model + '&width=1024&height=1024&seed=' + Math.floor(Math.random() * 1e6);
-  let r;
+async function searchImages(q) {
+  let query = imageTopic(q);
   try {
-    r = await fetch(base, { headers: hasKey() ? { Authorization: 'Bearer ' + cfg.aiKey } : {} });
-  } catch (e) {
-    // Tarayıcı doğrudan isteği engellediyse görseli doğrudan adresle göster
-    return base + (hasKey() ? '&key=' + encodeURIComponent(cfg.aiKey) : '');
-  }
+    // Pixabay İngilizce aramada daha iyi sonuç verir, yapay zeka çevirir
+    const en = await callAI([
+      { role: 'system', content: 'Kullanıcının istediği görseli stok fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz, başka hiçbir şey yazma.' },
+      { role: 'user', content: q }
+    ]);
+    const clean = en.replace(/["\n.]/g, ' ').trim();
+    if (clean && clean.length <= 60) query = clean;
+  } catch (e) { console.warn(e); }
+
+  const url = 'https://pixabay.com/api/?key=' + encodeURIComponent(cfg.pixabayKey) +
+    '&q=' + encodeURIComponent(query.slice(0, 100)) +
+    '&image_type=all&safesearch=true&per_page=6&order=popular';
+  const r = await fetch(url);
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(`(${r.status}) ${t.slice(0, 200)}`);
+    throw new Error(`Pixabay hata verdi (${r.status}). ${t.slice(0, 150)}`);
   }
-  const type = r.headers.get('content-type') || '';
-  if (!type.startsWith('image/')) throw new Error('Görsel yerine başka bir cevap geldi.');
-  return shrink(await r.blob());
+  const d = await r.json();
+  return { query, hits: (d.hits || []).slice(0, 4) };
 }
 
-async function makeImage(q, bot) {
-  let prompt = q.replace(/^\/resim\s*/i, '');
-  try {
-    prompt = await callAI([
-      { role: 'system', content: 'Kullanıcının isteğinden, görsel üretim modeli için kısa ve ayrıntılı bir İngilizce prompt yaz. Sadece prompt metnini ver, başka hiçbir şey yazma.' },
-      { role: 'user', content: prompt }
-    ]);
-  } catch (e) { console.warn(e); }
-  prompt = prompt.replace(/["\n]/g, ' ').slice(0, 400).trim();
-
-  let lastErr = null;
-  for (const model of ['flux', 'turbo', 'gptimage']) {
-    try {
-      const src = await fetchImage(prompt, model);
-      bot.text = 'Görsel: ' + q;
-      bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" ' +
-        'onload="this.closest(\'#msgs\').scrollTop=1e9" ' +
-        'onerror="this.replaceWith(document.createTextNode(\'Görsel yüklenemedi. Anahtarını ve bakiyeni kontrol et.\'))">';
-      return;
-    } catch (e) { lastErr = e; console.warn(model, e); }
+async function showImages(q, bot) {
+  const { query, hits } = await searchImages(q);
+  if (!hits.length) {
+    bot.text = `"${query}" için görsel bulamadım. Başka kelimelerle dene.`;
+    delete bot.html;
+    return;
   }
-  throw new Error('Görsel oluşturulamadı. ' + (lastErr ? lastErr.message : ''));
+  bot.text = `Görsel arama: ${query}`;
+  bot.html = 'İşte "' + esc(query) + '" için bulduğum görseller:' +
+    '<div class="gallery">' +
+    hits.map(h => `<a href="${esc(h.pageURL)}" target="_blank" rel="noopener"><img src="${esc(h.webformatURL)}" alt="${esc(h.tags || query)}" loading="lazy"></a>`).join('') +
+    '</div><div class="credit">Görseller: <a href="https://pixabay.com" target="_blank" rel="noopener">Pixabay</a></div>';
 }
 
 /* ---------- Soru cevap ---------- */
@@ -232,8 +229,8 @@ async function ask(q) {
 
   try {
     if (await wantsImage(q)) {
-      bot.text = 'Görsel hazırlanıyor, 10-20 saniye sürebilir…'; renderMsgs();
-      await makeImage(q, bot);
+      bot.text = 'Görseller aranıyor…'; renderMsgs();
+      await showImages(q, bot);
     } else {
       let sources = [], searched = false;
       if (isSearch(q) && $('#web').checked) {
@@ -284,10 +281,10 @@ $('#settingsBtn').onclick = () => {
   $('#dlg').showModal();
 };
 $('#save').onclick = () => {
-  cfg = { aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
-  store.set('camai.cfg', cfg);
+  cfg = { ...cfg, aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
+  store.set('camai.cfg', { aiKey: cfg.aiKey, key: cfg.key, cx: cfg.cx });
 };
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v5';
+document.title = 'Cam AI v6';
