@@ -103,14 +103,28 @@ async function callAI(messages) {
 }
 
 /* ---------- Mesaj türünü belirleme ---------- */
-const IMG_WORD = /(fotoğraf|foto\b|resim|görsel|logo|illüstrasyon|çizim)/i;
-const IMG_ACT = /(oluştur|yap\b|yapar|üret|çiz|hazırla|istiyorum)/i;
-const isImage = q => q.startsWith('/resim') || (IMG_WORD.test(q) && IMG_ACT.test(q));
+// "resim", "resmi", "fotoğrafı", "görseli" gibi çekimleri de yakalar
+const IMG_HINT = /(resim|resm|fotoğraf|fotograf|foto\b|görsel|gorsel|logo|çiz|illüstrasyon|poster|duvar kağıdı)/i;
+const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiyorum|ver\b|göster|olsun)/i;
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
+
+async function wantsImage(q) {
+  if (/^\/resim/i.test(q)) return true;
+  if (!IMG_HINT.test(q)) return false;
+  try {
+    const out = await callAI([
+      { role: 'system', content: 'Kullanıcı yeni bir görsel, resim, fotoğraf veya logo ÜRETİLMESİNİ mi istiyor? Sadece soru soruyor, bilgi istiyor ya da sohbet ediyorsa HAYIR. Sadece EVET veya HAYIR yaz.' },
+      { role: 'user', content: q }
+    ]);
+    return /evet/i.test(out);
+  } catch (e) {
+    return IMG_ACT.test(q);
+  }
+}
 
 // "Seni kim yaptı" gibi sorular doğrudan cevaplanır
 const WHO_MADE = /(seni|sizi).{0,20}(kim|kimin).{0,20}(yaptı|yapmış|geliştir|oluştur|kodla|tasarla|üret|yazdı)|kim(in)? tarafından.{0,20}(yapıl|geliştiril|oluşturul|tasarlan)|(yaratıcın|geliştiricin|yapımcın|yapımcınız|sahibin) kim|hangi şirket.{0,20}(yaptı|geliştir)|(kim yaptı|kim geliştirdi) seni|kim yaptı|kim geliştirdi/i;
-const isWhoMade = q => WHO_MADE.test(q) && !isImage(q) && q.length < 80;
+const isWhoMade = q => WHO_MADE.test(q) && !IMG_HINT.test(q) && q.length < 80;
 
 function topicOf(q) {
   const t = q
@@ -122,12 +136,34 @@ function topicOf(q) {
 }
 
 /* ---------- Görsel üretimi ---------- */
-window.imgFail = img => {
-  const src = img.src;
-  const show = t => img.replaceWith(document.createTextNode(t));
-  fetch(src).then(async r => show(`Görsel oluşturulamadı (${r.status}). ${(await r.text()).slice(0, 150)}`))
-    .catch(() => show('Görsel oluşturulamadı. Bağlantıyı veya bakiyeni kontrol et.'));
-};
+async function shrink(blob) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bmp.width * s);
+  cv.height = Math.round(bmp.height * s);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/jpeg', 0.82);
+}
+
+async function fetchImage(prompt, model) {
+  const base = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) +
+    '?model=' + model + '&width=1024&height=1024&seed=' + Math.floor(Math.random() * 1e6);
+  let r;
+  try {
+    r = await fetch(base, { headers: hasKey() ? { Authorization: 'Bearer ' + cfg.aiKey } : {} });
+  } catch (e) {
+    // Tarayıcı doğrudan isteği engellediyse görseli doğrudan adresle göster
+    return base + (hasKey() ? '&key=' + encodeURIComponent(cfg.aiKey) : '');
+  }
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`(${r.status}) ${t.slice(0, 200)}`);
+  }
+  const type = r.headers.get('content-type') || '';
+  if (!type.startsWith('image/')) throw new Error('Görsel yerine başka bir cevap geldi.');
+  return shrink(await r.blob());
+}
 
 async function makeImage(q, bot) {
   let prompt = q.replace(/^\/resim\s*/i, '');
@@ -137,13 +173,20 @@ async function makeImage(q, bot) {
       { role: 'user', content: prompt }
     ]);
   } catch (e) { console.warn(e); }
-  prompt = prompt.replace(/["\n]/g, ' ').slice(0, 500).trim();
-  const url = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) +
-    '?width=1024&height=1024&seed=' + Math.floor(Math.random() * 1e6) +
-    (hasKey() ? '&key=' + encodeURIComponent(cfg.aiKey) : '');
-  bot.text = 'Görsel: ' + q;
-  bot.html = 'İşte görselin:<img src="' + esc(url) + '" alt="' + esc(q) + '" ' +
-    'onload="this.closest(\'#msgs\').scrollTop=1e9" onerror="imgFail(this)">';
+  prompt = prompt.replace(/["\n]/g, ' ').slice(0, 400).trim();
+
+  let lastErr = null;
+  for (const model of ['flux', 'turbo', 'gptimage']) {
+    try {
+      const src = await fetchImage(prompt, model);
+      bot.text = 'Görsel: ' + q;
+      bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" ' +
+        'onload="this.closest(\'#msgs\').scrollTop=1e9" ' +
+        'onerror="this.replaceWith(document.createTextNode(\'Görsel yüklenemedi. Anahtarını ve bakiyeni kontrol et.\'))">';
+      return;
+    } catch (e) { lastErr = e; console.warn(model, e); }
+  }
+  throw new Error('Görsel oluşturulamadı. ' + (lastErr ? lastErr.message : ''));
 }
 
 /* ---------- Soru cevap ---------- */
@@ -153,7 +196,7 @@ const BASE_RULES =
   'Türkçe, doğal, samimi ve kısa cevap ver. ' +
   'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
   'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
-  'Görsel oluşturamazsın, görsel ürettiğini veya üreteceğini asla söyleme.';
+  'Görsel isteklerini site senin yerine otomatik karşılar, bu yüzden "görsel oluşturamam" deme ve özür dileme.';
 
 async function ask(q) {
   const c = current() || (newChat(), current());
@@ -172,8 +215,8 @@ async function ask(q) {
   c.msgs.push(bot); save(); render();
 
   try {
-    if (isImage(q)) {
-      bot.text = 'Görsel hazırlanıyor…'; renderMsgs();
+    if (await wantsImage(q)) {
+      bot.text = 'Görsel hazırlanıyor, 10-20 saniye sürebilir…'; renderMsgs();
       await makeImage(q, bot);
     } else {
       let sources = [], searched = false;
@@ -231,4 +274,4 @@ $('#save').onclick = () => {
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v3';
+document.title = 'Cam AI v4';
