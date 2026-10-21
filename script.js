@@ -6,16 +6,14 @@ const store = {
 
 const DEFAULTS = {
   aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',
-  pixabayKey: '58156341-813AE128f4626ff9b23e2d30e',
-  key: '',   // Google API anahtarı (isteğe bağlı, görsel aramayı Google'a da açar)
-  cx: ''     // Google arama motoru kimliği (isteğe bağlı)
+  key: '',   // Google API anahtarı (buraya yazabilirsin ya da Ayarlar'dan gir)
+  cx: ''     // Google arama motoru kimliği (görsel arama açık olmalı)
 };
 
 let chats = store.get('camai.chats', []);
 let saved = store.get('camai.cfg', {});
 let cfg = {
   aiKey: saved.aiKey || DEFAULTS.aiKey,
-  pixabayKey: DEFAULTS.pixabayKey,
   key: saved.key || DEFAULTS.key,
   cx: saved.cx || DEFAULTS.cx
 };
@@ -62,7 +60,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "siyah pitbull resmi göster" yazabilirsin.</div>';
+    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "siyah pitbull resmi oluştur" yazabilirsin.</div>';
     return;
   }
   box.innerHTML = '';
@@ -140,7 +138,7 @@ function topicOf(q) {
   return t || q;
 }
 
-/* ---------- Görsel arama: Pixabay -> Google (anahtar girildiyse) -> Vikimedia ---------- */
+/* ---------- Görsel arama: Google (anahtar varsa) -> Vikimedia Commons ---------- */
 function imageTopic(q) {
   const t = q
     .replace(/^\/resim/i, ' ')
@@ -151,22 +149,15 @@ function imageTopic(q) {
   return t || q;
 }
 
-async function pixabaySearch(query) {
-  const url = 'https://pixabay.com/api/?key=' + encodeURIComponent(cfg.pixabayKey) +
-    '&q=' + encodeURIComponent(query.slice(0, 100)) +
-    '&image_type=all&safesearch=true&per_page=6&order=popular';
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('Pixabay ' + r.status);
-  const d = await r.json();
-  return (d.hits || []).slice(0, 4).map(h => ({ img: h.webformatURL, link: h.pageURL, alt: h.tags || query }));
-}
-
 async function googleImageSearch(query) {
   if (!cfg.key || !cfg.cx) return [];
   const url = 'https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(cfg.key) +
-    '&cx=' + encodeURIComponent(cfg.cx) + '&searchType=image&num=4&safe=active&q=' + encodeURIComponent(query);
+    '&cx=' + encodeURIComponent(cfg.cx) + '&searchType=image&num=4&safe=active&hl=tr&q=' + encodeURIComponent(query);
   const r = await fetch(url);
-  if (!r.ok) throw new Error('Google ' + r.status);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error('Google ' + r.status + ' ' + t.slice(0, 120));
+  }
   const d = await r.json();
   return (d.items || []).slice(0, 4).map(i => ({
     img: i.image?.thumbnailLink || i.link,
@@ -191,30 +182,30 @@ async function commonsSearch(query) {
 async function searchImages(q) {
   let query = imageTopic(q);
   try {
+    // Arama için kısa İngilizce ifade (arama motorları İngilizcede daha iyi sonuç verir)
     const en = await callAI([
-      { role: 'system', content: 'Kullanıcının istediği görseli stok fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz, başka hiçbir şey yazma.' },
+      { role: 'system', content: 'Kullanıcının istediği görseli fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz, başka hiçbir şey yazma.' },
       { role: 'user', content: q }
     ]);
     const clean = en.replace(/["\n.]/g, ' ').trim();
     if (clean && clean.length <= 60 && !/[{}]/.test(clean)) query = clean;
   } catch (e) { console.warn(e); }
 
-  const providers = [
-    ['Pixabay', pixabaySearch],
-    ['Google', googleImageSearch],
-    ['Vikimedia Commons', commonsSearch]
-  ];
-  for (const [name, fn] of providers) {
+  let note = '';
+  for (const [name, fn] of [['Google', googleImageSearch], ['Vikimedia Commons', commonsSearch]]) {
     try {
       const hits = await fn(query);
-      if (hits.length) return { query, hits, source: name };
-    } catch (e) { console.warn(name, e); }
+      if (hits.length) return { query, hits, source: name, note };
+    } catch (e) {
+      console.warn(name, e);
+      if (name === 'Google') note = 'Google görsel araması çalışmadı, başka kaynaktan getirildi. ';
+    }
   }
-  return { query, hits: [], source: '' };
+  return { query, hits: [], source: '', note };
 }
 
 async function showImages(q, bot) {
-  const { query, hits, source } = await searchImages(q);
+  const { query, hits, source, note } = await searchImages(q);
   const gLink = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(query);
   if (!hits.length) {
     bot.text = `"${query}" için uygun görsel bulamadım.`;
@@ -225,7 +216,8 @@ async function showImages(q, bot) {
   bot.html = 'İşte "' + esc(query) + '" için bulduğum görseller:' +
     '<div class="gallery">' +
     hits.map(h => `<a href="${esc(h.link)}" target="_blank" rel="noopener"><img src="${esc(h.img)}" alt="${esc(h.alt)}" loading="lazy"></a>`).join('') +
-    '</div><div class="credit">Kaynak: ' + esc(source) + ' · <a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de daha fazla</a></div>';
+    '</div><div class="credit">' + esc(note) + 'Kaynak: ' + esc(source) +
+    ' · <a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de daha fazla</a></div>';
 }
 
 /* ---------- Soru cevap ---------- */
@@ -316,10 +308,10 @@ $('#settingsBtn').onclick = () => {
   $('#dlg').showModal();
 };
 $('#save').onclick = () => {
-  cfg = { ...cfg, aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
-  store.set('camai.cfg', { aiKey: cfg.aiKey, key: cfg.key, cx: cfg.cx });
+  cfg = { aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
+  store.set('camai.cfg', cfg);
 };
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v7';
+document.title = 'Cam AI v8';
