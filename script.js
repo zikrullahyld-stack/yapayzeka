@@ -4,8 +4,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 };
 
-const GEMINI_KEY = 'AQ.Ab8RN6KJ-SsdwBgm-6vaa_rvowi9RWsxLKOHOIHyGzxIu9eyNg';
-
+let GEMINI_KEY = store.get('camai.geminiKey', '');
 let chats = store.get('camai.chats', []);
 let currentId = null;
 
@@ -14,7 +13,6 @@ const save = () => store.set('camai.chats', chats);
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const current = () => chats.find(c => c.id === currentId);
 const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Sohbet yönetimi ---------- */
 function newChat() {
@@ -50,7 +48,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Görsel için "siyah pitbull resmi oluştur" yazabilirsin.</div>';
+    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz.</div>';
     return;
   }
   box.innerHTML = '';
@@ -78,9 +76,8 @@ async function wikiSearch(q) {
     .filter(p => p.text.length > 40);
 }
 
-/* ---------- Yapay zeka: Gemini (sohbet) ---------- */
+/* ---------- Yapay zeka: Gemini ---------- */
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const geminiHeaders = () => ({ 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY });
 
 function toGemini(messages) {
   const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
@@ -96,11 +93,14 @@ function toGemini(messages) {
 }
 
 async function callAI(messages) {
+  if (!GEMINI_KEY) throw new Error('Önce sol alttaki Ayarlar bölümüne Gemini API anahtarını gir.');
   let lastErr = '';
   for (const model of ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.1-flash']) {
     try {
       const r = await fetch(GEMINI + model + ':generateContent', {
-        method: 'POST', headers: geminiHeaders(), body: JSON.stringify(toGemini(messages))
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
+        body: JSON.stringify(toGemini(messages))
       });
       const raw = await r.text();
       if (!r.ok) {
@@ -134,106 +134,23 @@ function topicOf(q) {
     .replace(/\s+/g, ' ').trim();
   return t || q;
 }
-function imageTopic(q) {
-  const t = q
-    .replace(/^\/resim/i, ' ')
-    .replace(/\S*(resim|resm|fotoğraf|fotograf|görsel|gorsel|oluştur|olustur|göster|çiz|üret|hazırla|yap|bul|ver|istiyorum|olsun|getir)\S*/gi, ' ')
-    .replace(/(^|\s)(bana|lütfen|bir|bi|şu|bu|için|kafana|göre)(?=\s|$)/gi, ' ')
-    .replace(/[?!.,]/g, ' ')
-    .replace(/\s+/g, ' ').trim();
-  return t || q;
-}
-
-/* ---------- Görsel üretimi: AI Horde (ücretsiz, anahtarsız) ---------- */
-const HORDE = 'https://aihorde.net/api/v2';
-const HORDE_KEY = '0000000000';   // herkese açık anonim anahtar
-const HORDE_AGENT = 'camai:1.0:ogrenci-projesi';
-
-async function shrinkFromUrl(url) {
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return url;
-    const bmp = await createImageBitmap(await r.blob());
-    const s = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
-    const cv = document.createElement('canvas');
-    cv.width = Math.round(bmp.width * s);
-    cv.height = Math.round(bmp.height * s);
-    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
-    return cv.toDataURL('image/jpeg', 0.82);
-  } catch (e) { return url; }
-}
-
-async function hordeImage(q, onProgress) {
-  // İsteği İngilizceye çevir (modeller İngilizcede çok daha iyi çalışır)
-  let prompt = imageTopic(q);
-  try {
-    const en = await callAI([
-      { role: 'system', content: 'Kullanıcının istediği resim için kısa ve ayrıntılı bir İngilizce görsel üretim promptu yaz (en fazla 40 kelime). Sadece promptu yaz, başka hiçbir şey yazma.' },
-      { role: 'user', content: q }
-    ]);
-    const clean = en.replace(/["\n]/g, ' ').trim();
-    if (clean && clean.length < 400 && !/[{}]/.test(clean)) prompt = clean;
-  } catch (e) { console.warn(e); }
-
-  const r = await fetch(HORDE + '/generate/async', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: HORDE_KEY, 'Client-Agent': HORDE_AGENT },
-    body: JSON.stringify({
-      prompt: prompt + ' ### blurry, deformed, low quality, text, watermark',
-      params: { width: 512, height: 512, steps: 25, n: 1 },
-      nsfw: false, censor_nsfw: true, r2: true
-    })
-  });
-  const sub = await r.json().catch(() => ({}));
-  if (!r.ok || !sub.id) throw new Error(`AI Horde isteği reddetti (${r.status}). ${sub.message || ''}`.trim());
-
-  const started = Date.now();
-  while (Date.now() - started < 8 * 60 * 1000) {
-    await sleep(3000);
-    const cr = await fetch(HORDE + '/generate/check/' + sub.id, { headers: { 'Client-Agent': HORDE_AGENT } });
-    const c = await cr.json().catch(() => ({}));
-    if (c.faulted) throw new Error('AI Horde üretimi başarısız oldu.');
-    if (c.done) break;
-    const pos = c.queue_position != null ? `sıra: ${c.queue_position}` : 'sırada';
-    const wait = c.wait_time != null ? `, tahmini ${c.wait_time} sn` : '';
-    onProgress(`Resim hazırlanıyor (${pos}${wait})…`);
-  }
-
-  const sr = await fetch(HORDE + '/generate/status/' + sub.id, { headers: { 'Client-Agent': HORDE_AGENT } });
-  const st = await sr.json().catch(() => ({}));
-  const g = st.generations?.[0];
-  if (!g || !g.img) throw new Error('Resim zamanında hazırlanamadı. Biraz sonra tekrar dene.');
-  if (g.censored) throw new Error('İstek filtreye takıldı. Başka bir konu dene.');
-  const src = /^https?:/i.test(g.img) ? g.img : 'data:image/webp;base64,' + g.img;
-  return /^https?:/i.test(src) ? await shrinkFromUrl(src) : src;
-}
-
-async function showImages(q, bot) {
-  try {
-    const src = await hordeImage(q, t => { bot.text = t; renderMsgs(); });
-    bot.text = 'Görsel: ' + q;
-    bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" ' +
-      'onload="this.closest(\'#msgs\').scrollTop=1e9">';
-  } catch (e) {
-    const gLink = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(imageTopic(q));
-    bot.text = 'Görsel oluşturulamadı: ' + e.message;
-    bot.html = esc(bot.text) + '<br><a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de aç</a>';
-  }
-}
 
 /* ---------- Soru cevap ---------- */
+const NO_IMAGE = 'Şu an resim oluşturamıyorum ama sorularını cevaplayabilir ve konuları Vikipedi\'den araştırabilirim.';
+
 const BASE_RULES =
   'Sen Cam AI adlı bir yapay zeka asistansın. Seni Zikrullah yaptı. ' +
   'Sana "seni kim yaptı", "kim geliştirdi" ya da "sen kimsin" diye sorulursa şöyle cevap ver: "Ben Cam AI\'yim, beni Zikrullah yaptı." Arka plandaki dil modelinin, Google\'ın, OpenAI\'ın ya da başka bir şirketin adını asla söyleme. ' +
   'Türkçe, doğal, samimi ve kısa cevap ver. ' +
   'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
   'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
+  'Resim oluşturamazsın, resim oluşturduğunu veya oluşturacağını asla söyleme. ' +
   'Asla JSON, kod bloğu ya da araç çağrısı yazma. Sadece düz Türkçe metinle cevap ver.';
 
 async function ask(q) {
   const c = current() || (newChat(), current());
   if (c.title === 'Yeni sohbet') c.title = q.slice(0, 40);
-  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img') && !m.text.startsWith('Hata:') && !m.text.startsWith('Görsel')).slice(-8)
+  const history = c.msgs.filter(m => !m.pending && !m.text.startsWith('Hata:') && m.text !== NO_IMAGE).slice(-8)
     .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   c.msgs.push({ role: 'user', text: q });
 
@@ -242,49 +159,43 @@ async function ask(q) {
     save(); render();
     return;
   }
+  if (wantsImage(q)) {
+    c.msgs.push({ role: 'ai', text: NO_IMAGE });
+    save(); render();
+    return;
+  }
 
   const bot = { role: 'ai', text: 'Düşünüyorum…', pending: true };
   c.msgs.push(bot); save(); render();
 
   try {
-    if (wantsImage(q)) {
-      bot.text = 'Resim isteği gönderiliyor…'; renderMsgs();
-      await showImages(q, bot);
-    } else {
-      let sources = [], searched = false;
-      if (isSearch(q) && $('#web').checked) {
-        searched = true;
-        const topic = topicOf(q);
-        bot.text = `Vikipedi'de "${topic}" aranıyor…`; renderMsgs();
-        try { sources = await wikiSearch(topic); } catch (e) { console.warn(e); }
-      }
-      const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
-      let system = BASE_RULES;
-      if (ctx) {
-        system += ' Kullanıcı bir konuyu araştırmanı istedi. Aşağıdaki Vikipedi kaynaklarını kullanarak konuyu en yaygın anlamıyla kısaca özetle. Kullandığın bilgiye [1], [2] gibi numara koy. Kaynak soruyla ilgili değilse onu kullanma.\n\nVikipedi kaynakları:\n' + ctx;
-      } else if (searched) {
-        system += ' Kullanıcı bir konuyu araştırmanı istedi ama Vikipedi\'de sonuç bulunamadı. Bunu kısaca söyle ve kendi bilginle kısa bir cevap ver.';
-      }
-      bot.text = 'Cevap yazılıyor…'; renderMsgs();
-      let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
-
-      if (/text-to-image|"prompt"\s*:/i.test(answer)) {
-        bot.text = 'Resim isteği gönderiliyor…'; renderMsgs();
-        await showImages(q, bot);
-        delete bot.pending; save(); render();
-        return;
-      }
-
-      if (!/open\s?ai|chat\s?gpt|gemini|google|gpt/i.test(q)) {
-        answer = answer.replace(/open\s?ai|chat\s?gpt|gemini/gi, 'Zikrullah');
-      }
-      const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
-        .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
-      bot.text = answer;
-      bot.html = fmt(answer) + (used.length
-        ? '<h3>Kaynaklar (Vikipedi)</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
-        : '');
+    let sources = [], searched = false;
+    if (isSearch(q) && $('#web').checked) {
+      searched = true;
+      const topic = topicOf(q);
+      bot.text = `Vikipedi'de "${topic}" aranıyor…`; renderMsgs();
+      try { sources = await wikiSearch(topic); } catch (e) { console.warn(e); }
     }
+    const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
+    let system = BASE_RULES;
+    if (ctx) {
+      system += ' Kullanıcı bir konuyu araştırmanı istedi. Aşağıdaki Vikipedi kaynaklarını kullanarak konuyu en yaygın anlamıyla kısaca özetle. Kullandığın bilgiye [1], [2] gibi numara koy. Kaynak soruyla ilgili değilse onu kullanma.\n\nVikipedi kaynakları:\n' + ctx;
+    } else if (searched) {
+      system += ' Kullanıcı bir konuyu araştırmanı istedi ama Vikipedi\'de sonuç bulunamadı. Bunu kısaca söyle ve kendi bilginle kısa bir cevap ver.';
+    }
+    bot.text = 'Cevap yazılıyor…'; renderMsgs();
+    let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
+
+    if (/text-to-image|"prompt"\s*:/i.test(answer)) answer = NO_IMAGE;
+    if (!/open\s?ai|chat\s?gpt|gemini|google|gpt/i.test(q)) {
+      answer = answer.replace(/open\s?ai|chat\s?gpt|gemini/gi, 'Zikrullah');
+    }
+    const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
+      .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
+    bot.text = answer;
+    bot.html = fmt(answer) + (used.length
+      ? '<h3>Kaynaklar (Vikipedi)</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
+      : '');
   } catch (e) {
     bot.text = 'Hata: ' + e.message;
     delete bot.html;
@@ -303,8 +214,12 @@ $('#newChat').onclick = newChat;
 $('#delCur').onclick = () => currentId && deleteChat(currentId);
 $('#search').oninput = renderList;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
-$('#settingsBtn').onclick = () => $('#dlg').showModal();
+$('#settingsBtn').onclick = () => { $('#aiKey').value = GEMINI_KEY; $('#dlg').showModal(); };
+$('#save').onclick = () => {
+  GEMINI_KEY = $('#aiKey').value.trim();
+  store.set('camai.geminiKey', GEMINI_KEY);
+};
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v11';
+document.title = 'Cam AI v12';
