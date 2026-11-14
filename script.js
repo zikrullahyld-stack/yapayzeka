@@ -14,6 +14,7 @@ const save = () => store.set('camai.chats', chats);
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const current = () => chats.find(c => c.id === currentId);
 const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Sohbet yönetimi ---------- */
 function newChat() {
@@ -77,7 +78,7 @@ async function wikiSearch(q) {
     .filter(p => p.text.length > 40);
 }
 
-/* ---------- Yapay zeka: Gemini ---------- */
+/* ---------- Yapay zeka: Gemini (sohbet) ---------- */
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const geminiHeaders = () => ({ 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY });
 
@@ -143,46 +144,73 @@ function imageTopic(q) {
   return t || q;
 }
 
-/* ---------- Görsel üretimi (Gemini) ---------- */
-async function shrink(blob) {
-  const bmp = await createImageBitmap(blob);
-  const s = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
-  const cv = document.createElement('canvas');
-  cv.width = Math.round(bmp.width * s);
-  cv.height = Math.round(bmp.height * s);
-  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
-  return cv.toDataURL('image/jpeg', 0.82);
+/* ---------- Görsel üretimi: AI Horde (ücretsiz, anahtarsız) ---------- */
+const HORDE = 'https://aihorde.net/api/v2';
+const HORDE_KEY = '0000000000';   // herkese açık anonim anahtar
+const HORDE_AGENT = 'camai:1.0:ogrenci-projesi';
+
+async function shrinkFromUrl(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return url;
+    const bmp = await createImageBitmap(await r.blob());
+    const s = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(bmp.width * s);
+    cv.height = Math.round(bmp.height * s);
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    return cv.toDataURL('image/jpeg', 0.82);
+  } catch (e) { return url; }
 }
 
-async function geminiImage(q) {
-  const prompt = 'Create an image: ' + imageTopic(q);
-  let lastErr = '';
-  for (const model of ['gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3.1-flash-lite-image']) {
-    try {
-      const r = await fetch(GEMINI + model + ':generateContent', {
-        method: 'POST', headers: geminiHeaders(),
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
-        })
-      });
-      const raw = await r.text();
-      if (!r.ok) { lastErr = `${model} (${r.status}) ${raw.slice(0, 200)}`; continue; }
-      const d = JSON.parse(raw);
-      const part = (d.candidates?.[0]?.content?.parts || []).find(p => p.inlineData || p.inline_data);
-      const inl = part && (part.inlineData || part.inline_data);
-      if (!inl) { lastErr = `${model} görsel döndürmedi.`; continue; }
-      const mime = inl.mimeType || inl.mime_type || 'image/png';
-      const blob = await (await fetch(`data:${mime};base64,${inl.data}`)).blob();
-      return await shrink(blob);
-    } catch (e) { lastErr = e.message; }
+async function hordeImage(q, onProgress) {
+  // İsteği İngilizceye çevir (modeller İngilizcede çok daha iyi çalışır)
+  let prompt = imageTopic(q);
+  try {
+    const en = await callAI([
+      { role: 'system', content: 'Kullanıcının istediği resim için kısa ve ayrıntılı bir İngilizce görsel üretim promptu yaz (en fazla 40 kelime). Sadece promptu yaz, başka hiçbir şey yazma.' },
+      { role: 'user', content: q }
+    ]);
+    const clean = en.replace(/["\n]/g, ' ').trim();
+    if (clean && clean.length < 400 && !/[{}]/.test(clean)) prompt = clean;
+  } catch (e) { console.warn(e); }
+
+  const r = await fetch(HORDE + '/generate/async', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: HORDE_KEY, 'Client-Agent': HORDE_AGENT },
+    body: JSON.stringify({
+      prompt: prompt + ' ### blurry, deformed, low quality, text, watermark',
+      params: { width: 512, height: 512, steps: 25, n: 1 },
+      nsfw: false, censor_nsfw: true, r2: true
+    })
+  });
+  const sub = await r.json().catch(() => ({}));
+  if (!r.ok || !sub.id) throw new Error(`AI Horde isteği reddetti (${r.status}). ${sub.message || ''}`.trim());
+
+  const started = Date.now();
+  while (Date.now() - started < 8 * 60 * 1000) {
+    await sleep(3000);
+    const cr = await fetch(HORDE + '/generate/check/' + sub.id, { headers: { 'Client-Agent': HORDE_AGENT } });
+    const c = await cr.json().catch(() => ({}));
+    if (c.faulted) throw new Error('AI Horde üretimi başarısız oldu.');
+    if (c.done) break;
+    const pos = c.queue_position != null ? `sıra: ${c.queue_position}` : 'sırada';
+    const wait = c.wait_time != null ? `, tahmini ${c.wait_time} sn` : '';
+    onProgress(`Resim hazırlanıyor (${pos}${wait})…`);
   }
-  throw new Error(lastErr || 'Görsel üretilemedi.');
+
+  const sr = await fetch(HORDE + '/generate/status/' + sub.id, { headers: { 'Client-Agent': HORDE_AGENT } });
+  const st = await sr.json().catch(() => ({}));
+  const g = st.generations?.[0];
+  if (!g || !g.img) throw new Error('Resim zamanında hazırlanamadı. Biraz sonra tekrar dene.');
+  if (g.censored) throw new Error('İstek filtreye takıldı. Başka bir konu dene.');
+  const src = /^https?:/i.test(g.img) ? g.img : 'data:image/webp;base64,' + g.img;
+  return /^https?:/i.test(src) ? await shrinkFromUrl(src) : src;
 }
 
 async function showImages(q, bot) {
   try {
-    const src = await geminiImage(q);
+    const src = await hordeImage(q, t => { bot.text = t; renderMsgs(); });
     bot.text = 'Görsel: ' + q;
     bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" ' +
       'onload="this.closest(\'#msgs\').scrollTop=1e9">';
@@ -220,7 +248,7 @@ async function ask(q) {
 
   try {
     if (wantsImage(q)) {
-      bot.text = 'Görsel oluşturuluyor, 10-20 saniye sürebilir…'; renderMsgs();
+      bot.text = 'Resim isteği gönderiliyor…'; renderMsgs();
       await showImages(q, bot);
     } else {
       let sources = [], searched = false;
@@ -241,7 +269,7 @@ async function ask(q) {
       let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
 
       if (/text-to-image|"prompt"\s*:/i.test(answer)) {
-        bot.text = 'Görsel oluşturuluyor…'; renderMsgs();
+        bot.text = 'Resim isteği gönderiliyor…'; renderMsgs();
         await showImages(q, bot);
         delete bot.pending; save(); render();
         return;
@@ -279,4 +307,4 @@ $('#settingsBtn').onclick = () => $('#dlg').showModal();
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v10';
+document.title = 'Cam AI v11';
