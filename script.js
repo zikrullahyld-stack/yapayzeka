@@ -4,7 +4,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 };
 
-let GEMINI_KEY = store.get('camai.geminiKey', '');
+let GEMINI_KEY = store.get('camai.geminiKey', '') || 'AQ.Ab8RN6KJ-SsdwBgm-6vaa_rvowi9RWsxLKOHOIHyGzxIu9eyNg';
 let chats = store.get('camai.chats', []);
 let currentId = null;
 
