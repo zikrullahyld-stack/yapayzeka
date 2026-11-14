@@ -5,14 +5,16 @@ const store = {
 };
 
 const DEFAULTS = {
-  aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',
-  key: '',   // Google API anahtarı (buraya yazabilirsin ya da Ayarlar'dan gir)
-  cx: ''     // Google arama motoru kimliği (görsel arama açık olmalı)
+  geminiKey: 'AQ.Ab8RN6KOMvl1GDXNSyawSlna11pB-Txwid_82lxF1I0095eWAA',
+  aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',   // Pollinations (yedek)
+  key: '',
+  cx: ''
 };
 
 let chats = store.get('camai.chats', []);
 let saved = store.get('camai.cfg', {});
 let cfg = {
+  geminiKey: DEFAULTS.geminiKey,
   aiKey: saved.aiKey || DEFAULTS.aiKey,
   key: saved.key || DEFAULTS.key,
   cx: saved.cx || DEFAULTS.cx
@@ -23,7 +25,6 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const save = () => store.set('camai.chats', chats);
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const current = () => chats.find(c => c.id === currentId);
-const hasKey = () => !!cfg.aiKey;
 const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 
 /* ---------- Sohbet yönetimi ---------- */
@@ -88,35 +89,65 @@ async function wikiSearch(q) {
     .filter(p => p.text.length > 40);
 }
 
-/* ---------- Yapay zeka (boş cevap gelirse başka model dener) ---------- */
-async function callAI(messages) {
-  const url = hasKey() ? 'https://gen.pollinations.ai/v1/chat/completions' : 'https://text.pollinations.ai/openai';
-  const headers = { 'Content-Type': 'application/json' };
-  if (hasKey()) headers.Authorization = 'Bearer ' + cfg.aiKey;
+/* ---------- Yapay zeka: Gemini (yedek: Pollinations) ---------- */
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const geminiHeaders = () => ({ 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey });
 
+function toGemini(messages) {
+  const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+  const contents = [];
+  for (const m of messages.filter(m => m.role !== 'system')) {
+    const role = m.role === 'user' ? 'user' : 'model';
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) last.parts[0].text += '\n' + m.content;
+    else contents.push({ role, parts: [{ text: m.content }] });
+  }
+  while (contents.length && contents[0].role !== 'user') contents.shift();
+  return { systemInstruction: sys ? { parts: [{ text: sys }] } : undefined, contents };
+}
+
+async function callGemini(messages) {
   let lastErr = '';
-  for (const model of ['openai', 'gemini', 'openai-fast']) {
+  for (const model of ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.1-flash']) {
     try {
-      const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages }) });
+      const r = await fetch(GEMINI + model + ':generateContent', {
+        method: 'POST', headers: geminiHeaders(), body: JSON.stringify(toGemini(messages))
+      });
       const raw = await r.text();
       if (!r.ok) {
-        lastErr = `(${r.status}) ${raw.slice(0, 150)}`;
-        if ([401, 402, 403, 429].includes(r.status)) break;
+        lastErr = `Gemini (${r.status}) ${raw.slice(0, 160)}`;
+        if ([401, 403, 429].includes(r.status)) break;
         continue;
       }
-      let d;
-      try { d = JSON.parse(raw); } catch { lastErr = 'Geçersiz cevap geldi.'; continue; }
-      const choice = d.choices?.[0];
-      const c = choice?.message?.content;
-      let out = typeof c === 'string' ? c : Array.isArray(c) ? c.map(p => p.text || '').join('') : '';
-      out = (out || '').trim();
+      const d = JSON.parse(raw);
+      const out = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
       if (out) return out;
-      lastErr = `${model} boş cevap verdi (${choice?.finish_reason || 'sebep belirtilmedi'}).`;
-    } catch (e) {
-      lastErr = e.message;
-    }
+      lastErr = `${model} boş cevap verdi (${d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || 'sebep belirtilmedi'}).`;
+    } catch (e) { lastErr = e.message; }
   }
-  throw new Error('Yapay zeka cevap veremedi. ' + lastErr);
+  throw new Error(lastErr);
+}
+
+async function callPollinations(messages) {
+  const r = await fetch('https://gen.pollinations.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.aiKey },
+    body: JSON.stringify({ model: 'openai', messages })
+  });
+  const raw = await r.text();
+  if (!r.ok) throw new Error(`Pollinations (${r.status}) ${raw.slice(0, 120)}`);
+  const out = (JSON.parse(raw).choices?.[0]?.message?.content || '').trim();
+  if (!out) throw new Error('Pollinations boş cevap verdi.');
+  return out;
+}
+
+async function callAI(messages) {
+  try { return await callGemini(messages); }
+  catch (e1) {
+    if (!cfg.aiKey) throw new Error('Yapay zeka cevap veremedi. ' + e1.message);
+    try { return await callPollinations(messages); }
+    catch (e2) { throw new Error('Yapay zeka cevap veremedi. ' + e1.message + ' | ' + e2.message); }
+  }
 }
 
 /* ---------- Mesaj türünü belirleme ---------- */
@@ -125,7 +156,6 @@ const IMG_ACT = /(oluştur|olustur|yap\b|yapar|yapsana|üret|çiz|hazırla|istiy
 const isSearch = q => /araştır|arastir|araştir|arastır/i.test(q);
 const wantsImage = q => /^\/resim/i.test(q) || (IMG_HINT.test(q) && IMG_ACT.test(q));
 
-// "Seni kim yaptı" gibi sorular doğrudan cevaplanır
 const WHO_MADE = /(seni|sizi).{0,20}(kim|kimin).{0,20}(yaptı|yapmış|geliştir|oluştur|kodla|tasarla|üret|yazdı)|kim(in)? tarafından.{0,20}(yapıl|geliştiril|oluşturul|tasarlan)|(yaratıcın|geliştiricin|yapımcın|yapımcınız|sahibin) kim|hangi şirket.{0,20}(yaptı|geliştir)|(kim yaptı|kim geliştirdi) seni|kim yaptı|kim geliştirdi/i;
 const isWhoMade = q => WHO_MADE.test(q) && !IMG_HINT.test(q) && q.length < 80;
 
@@ -137,8 +167,6 @@ function topicOf(q) {
     .replace(/\s+/g, ' ').trim();
   return t || q;
 }
-
-/* ---------- Görsel arama: Google (anahtar varsa) -> Vikimedia Commons ---------- */
 function imageTopic(q) {
   const t = q
     .replace(/^\/resim/i, ' ')
@@ -149,23 +177,44 @@ function imageTopic(q) {
   return t || q;
 }
 
-async function googleImageSearch(query) {
-  if (!cfg.key || !cfg.cx) return [];
-  const url = 'https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(cfg.key) +
-    '&cx=' + encodeURIComponent(cfg.cx) + '&searchType=image&num=4&safe=active&hl=tr&q=' + encodeURIComponent(query);
-  const r = await fetch(url);
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error('Google ' + r.status + ' ' + t.slice(0, 120));
-  }
-  const d = await r.json();
-  return (d.items || []).slice(0, 4).map(i => ({
-    img: i.image?.thumbnailLink || i.link,
-    link: i.image?.contextLink || i.link,
-    alt: i.title || query
-  }));
+/* ---------- Görsel üretimi (Gemini) ---------- */
+async function shrink(blob) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bmp.width * s);
+  cv.height = Math.round(bmp.height * s);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/jpeg', 0.82);
 }
 
+async function geminiImage(q) {
+  const prompt = 'Create an image: ' + imageTopic(q);
+  let lastErr = '';
+  for (const model of ['gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3.1-flash-lite-image']) {
+    try {
+      const r = await fetch(GEMINI + model + ':generateContent', {
+        method: 'POST', headers: geminiHeaders(),
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
+        })
+      });
+      const raw = await r.text();
+      if (!r.ok) { lastErr = `${model} (${r.status}) ${raw.slice(0, 180)}`; continue; }
+      const d = JSON.parse(raw);
+      const part = (d.candidates?.[0]?.content?.parts || []).find(p => p.inlineData || p.inline_data);
+      const inl = part && (part.inlineData || part.inline_data);
+      if (!inl) { lastErr = `${model} görsel döndürmedi.`; continue; }
+      const mime = inl.mimeType || inl.mime_type || 'image/png';
+      const blob = await (await fetch(`data:${mime};base64,${inl.data}`)).blob();
+      return await shrink(blob);
+    } catch (e) { lastErr = e.message; }
+  }
+  throw new Error(lastErr || 'Görsel üretilemedi.');
+}
+
+/* ---------- Yedek: Vikimedia Commons fotoğrafları ---------- */
 async function commonsSearch(query) {
   const url = 'https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6' +
     '&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=640&format=json&origin=*&gsrsearch=' + encodeURIComponent(query);
@@ -179,51 +228,46 @@ async function commonsSearch(query) {
     .map(i => ({ img: i.thumburl || i.url, link: i.descriptionurl, alt: query }));
 }
 
-async function searchImages(q) {
+async function showImages(q, bot) {
+  let reason = '';
+  try {
+    const src = await geminiImage(q);
+    bot.text = 'Görsel: ' + q;
+    bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" ' +
+      'onload="this.closest(\'#msgs\').scrollTop=1e9">';
+    return;
+  } catch (e) { reason = e.message; console.warn(e); }
+
+  // Üretim olmazsa benzer fotoğrafları getir
   let query = imageTopic(q);
   try {
-    // Arama için kısa İngilizce ifade (arama motorları İngilizcede daha iyi sonuç verir)
     const en = await callAI([
-      { role: 'system', content: 'Kullanıcının istediği görseli fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz, başka hiçbir şey yazma.' },
+      { role: 'system', content: 'Kullanıcının istediği görseli fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz.' },
       { role: 'user', content: q }
     ]);
     const clean = en.replace(/["\n.]/g, ' ').trim();
     if (clean && clean.length <= 60 && !/[{}]/.test(clean)) query = clean;
   } catch (e) { console.warn(e); }
 
-  let note = '';
-  for (const [name, fn] of [['Google', googleImageSearch], ['Vikimedia Commons', commonsSearch]]) {
-    try {
-      const hits = await fn(query);
-      if (hits.length) return { query, hits, source: name, note };
-    } catch (e) {
-      console.warn(name, e);
-      if (name === 'Google') note = 'Google görsel araması çalışmadı, başka kaynaktan getirildi. ';
-    }
-  }
-  return { query, hits: [], source: '', note };
-}
-
-async function showImages(q, bot) {
-  const { query, hits, source, note } = await searchImages(q);
   const gLink = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(query);
+  let hits = [];
+  try { hits = await commonsSearch(query); } catch (e) { console.warn(e); }
+  const note = 'Görsel oluşturulamadı: ' + reason.slice(0, 200);
   if (!hits.length) {
-    bot.text = `"${query}" için uygun görsel bulamadım.`;
-    bot.html = `"${esc(query)}" için uygun görsel bulamadım. <a href="${esc(gLink)}" target="_blank" rel="noopener">Google Görseller'de aç</a>`;
+    bot.text = note;
+    bot.html = esc(note) + '<br><a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de aç</a>';
     return;
   }
-  bot.text = `Görsel arama: ${query}`;
-  bot.html = 'İşte "' + esc(query) + '" için bulduğum görseller:' +
-    '<div class="gallery">' +
+  bot.text = 'Benzer görseller: ' + query;
+  bot.html = esc(note) + '<br>Bunun yerine benzer fotoğraflar:<div class="gallery">' +
     hits.map(h => `<a href="${esc(h.link)}" target="_blank" rel="noopener"><img src="${esc(h.img)}" alt="${esc(h.alt)}" loading="lazy"></a>`).join('') +
-    '</div><div class="credit">' + esc(note) + 'Kaynak: ' + esc(source) +
-    ' · <a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de daha fazla</a></div>';
+    '</div><div class="credit">Kaynak: Vikimedia Commons · <a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de daha fazla</a></div>';
 }
 
 /* ---------- Soru cevap ---------- */
 const BASE_RULES =
   'Sen Cam AI adlı bir yapay zeka asistansın. Seni Zikrullah yaptı. ' +
-  'Sana "seni kim yaptı", "kim geliştirdi" ya da "sen kimsin" diye sorulursa şöyle cevap ver: "Ben Cam AI\'yim, beni Zikrullah yaptı." Arka plandaki dil modelinin ya da şirketin adını asla söyleme. ' +
+  'Sana "seni kim yaptı", "kim geliştirdi" ya da "sen kimsin" diye sorulursa şöyle cevap ver: "Ben Cam AI\'yim, beni Zikrullah yaptı." Arka plandaki dil modelinin, Google\'ın, OpenAI\'ın ya da başka bir şirketin adını asla söyleme. ' +
   'Türkçe, doğal, samimi ve kısa cevap ver. ' +
   'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
   'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
@@ -232,7 +276,7 @@ const BASE_RULES =
 async function ask(q) {
   const c = current() || (newChat(), current());
   if (c.title === 'Yeni sohbet') c.title = q.slice(0, 40);
-  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img') && !m.text.startsWith('Hata:')).slice(-8)
+  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img') && !m.text.startsWith('Hata:') && !m.text.startsWith('Görsel')).slice(-8)
     .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   c.msgs.push({ role: 'user', text: q });
 
@@ -247,7 +291,7 @@ async function ask(q) {
 
   try {
     if (wantsImage(q)) {
-      bot.text = 'Görseller aranıyor…'; renderMsgs();
+      bot.text = 'Görsel oluşturuluyor, 10-20 saniye sürebilir…'; renderMsgs();
       await showImages(q, bot);
     } else {
       let sources = [], searched = false;
@@ -267,16 +311,15 @@ async function ask(q) {
       bot.text = 'Cevap yazılıyor…'; renderMsgs();
       let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
 
-      // Yapay zeka yine de sahte resim komutu yazarsa, görsel aramaya çevir
       if (/text-to-image|"prompt"\s*:/i.test(answer)) {
-        bot.text = 'Görseller aranıyor…'; renderMsgs();
+        bot.text = 'Görsel oluşturuluyor…'; renderMsgs();
         await showImages(q, bot);
         delete bot.pending; save(); render();
         return;
       }
 
-      if (!/open\s?ai|chat\s?gpt|gpt/i.test(q)) {
-        answer = answer.replace(/open\s?ai|chat\s?gpt/gi, 'Zikrullah');
+      if (!/open\s?ai|chat\s?gpt|gemini|google|gpt/i.test(q)) {
+        answer = answer.replace(/open\s?ai|chat\s?gpt|gemini/gi, 'Zikrullah');
       }
       const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
         .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
@@ -308,10 +351,10 @@ $('#settingsBtn').onclick = () => {
   $('#dlg').showModal();
 };
 $('#save').onclick = () => {
-  cfg = { aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
-  store.set('camai.cfg', cfg);
+  cfg = { ...cfg, aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
+  store.set('camai.cfg', { aiKey: cfg.aiKey, key: cfg.key, cx: cfg.cx });
 };
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v8';
+document.title = 'Cam AI v9';
