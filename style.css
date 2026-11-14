@@ -57,3 +57,9 @@ dialog::backdrop{background:rgba(5,8,25,.6)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 .msg img{display:block;max-width:100%;border-radius:14px;margin-top:10px}
 .msg b{color:#fff}
+
+.msg img{display:block;max-width:100%;border-radius:14px;margin-top:10px}
+.gallery{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}
+.gallery a{display:block}
+.gallery img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:12px;display:block}
+.credit{font-size:.8rem;color:var(--mut);margin-top:8px}
