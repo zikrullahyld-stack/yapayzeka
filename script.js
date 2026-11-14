@@ -4,21 +4,9 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 };
 
-const DEFAULTS = {
-  geminiKey: 'AQ.Ab8RN6KOMvl1GDXNSyawSlna11pB-Txwid_82lxF1I0095eWAA',
-  aiKey: 'sk_eOyzlCZgbCODMrKDb8Vrtrcy7UDT8mmq',   // Pollinations (yedek)
-  key: '',
-  cx: ''
-};
+const GEMINI_KEY = 'AQ.Ab8RN6KJ-SsdwBgm-6vaa_rvowi9RWsxLKOHOIHyGzxIu9eyNg';
 
 let chats = store.get('camai.chats', []);
-let saved = store.get('camai.cfg', {});
-let cfg = {
-  geminiKey: DEFAULTS.geminiKey,
-  aiKey: saved.aiKey || DEFAULTS.aiKey,
-  key: saved.key || DEFAULTS.key,
-  cx: saved.cx || DEFAULTS.cx
-};
 let currentId = null;
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -89,9 +77,9 @@ async function wikiSearch(q) {
     .filter(p => p.text.length > 40);
 }
 
-/* ---------- Yapay zeka: Gemini (yedek: Pollinations) ---------- */
+/* ---------- Yapay zeka: Gemini ---------- */
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const geminiHeaders = () => ({ 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey });
+const geminiHeaders = () => ({ 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY });
 
 function toGemini(messages) {
   const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
@@ -106,7 +94,7 @@ function toGemini(messages) {
   return { systemInstruction: sys ? { parts: [{ text: sys }] } : undefined, contents };
 }
 
-async function callGemini(messages) {
+async function callAI(messages) {
   let lastErr = '';
   for (const model of ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.1-flash']) {
     try {
@@ -115,7 +103,7 @@ async function callGemini(messages) {
       });
       const raw = await r.text();
       if (!r.ok) {
-        lastErr = `Gemini (${r.status}) ${raw.slice(0, 160)}`;
+        lastErr = `${model} (${r.status}) ${raw.slice(0, 200)}`;
         if ([401, 403, 429].includes(r.status)) break;
         continue;
       }
@@ -125,29 +113,7 @@ async function callGemini(messages) {
       lastErr = `${model} boş cevap verdi (${d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || 'sebep belirtilmedi'}).`;
     } catch (e) { lastErr = e.message; }
   }
-  throw new Error(lastErr);
-}
-
-async function callPollinations(messages) {
-  const r = await fetch('https://gen.pollinations.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.aiKey },
-    body: JSON.stringify({ model: 'openai', messages })
-  });
-  const raw = await r.text();
-  if (!r.ok) throw new Error(`Pollinations (${r.status}) ${raw.slice(0, 120)}`);
-  const out = (JSON.parse(raw).choices?.[0]?.message?.content || '').trim();
-  if (!out) throw new Error('Pollinations boş cevap verdi.');
-  return out;
-}
-
-async function callAI(messages) {
-  try { return await callGemini(messages); }
-  catch (e1) {
-    if (!cfg.aiKey) throw new Error('Yapay zeka cevap veremedi. ' + e1.message);
-    try { return await callPollinations(messages); }
-    catch (e2) { throw new Error('Yapay zeka cevap veremedi. ' + e1.message + ' | ' + e2.message); }
-  }
+  throw new Error('Yapay zeka cevap veremedi. ' + lastErr);
 }
 
 /* ---------- Mesaj türünü belirleme ---------- */
@@ -201,7 +167,7 @@ async function geminiImage(q) {
         })
       });
       const raw = await r.text();
-      if (!r.ok) { lastErr = `${model} (${r.status}) ${raw.slice(0, 180)}`; continue; }
+      if (!r.ok) { lastErr = `${model} (${r.status}) ${raw.slice(0, 200)}`; continue; }
       const d = JSON.parse(raw);
       const part = (d.candidates?.[0]?.content?.parts || []).find(p => p.inlineData || p.inline_data);
       const inl = part && (part.inlineData || part.inline_data);
@@ -214,54 +180,17 @@ async function geminiImage(q) {
   throw new Error(lastErr || 'Görsel üretilemedi.');
 }
 
-/* ---------- Yedek: Vikimedia Commons fotoğrafları ---------- */
-async function commonsSearch(query) {
-  const url = 'https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6' +
-    '&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=640&format=json&origin=*&gsrsearch=' + encodeURIComponent(query);
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('Vikimedia ' + r.status);
-  const d = await r.json();
-  return Object.values(d.query?.pages || {})
-    .map(p => p.imageinfo?.[0])
-    .filter(i => i && /\.(jpe?g|png)$/i.test(i.url || ''))
-    .slice(0, 4)
-    .map(i => ({ img: i.thumburl || i.url, link: i.descriptionurl, alt: query }));
-}
-
 async function showImages(q, bot) {
-  let reason = '';
   try {
     const src = await geminiImage(q);
     bot.text = 'Görsel: ' + q;
     bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" ' +
       'onload="this.closest(\'#msgs\').scrollTop=1e9">';
-    return;
-  } catch (e) { reason = e.message; console.warn(e); }
-
-  // Üretim olmazsa benzer fotoğrafları getir
-  let query = imageTopic(q);
-  try {
-    const en = await callAI([
-      { role: 'system', content: 'Kullanıcının istediği görseli fotoğraf sitesinde aramak için 1-3 kelimelik İngilizce bir arama ifadesi yaz. Sadece ifadeyi yaz.' },
-      { role: 'user', content: q }
-    ]);
-    const clean = en.replace(/["\n.]/g, ' ').trim();
-    if (clean && clean.length <= 60 && !/[{}]/.test(clean)) query = clean;
-  } catch (e) { console.warn(e); }
-
-  const gLink = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(query);
-  let hits = [];
-  try { hits = await commonsSearch(query); } catch (e) { console.warn(e); }
-  const note = 'Görsel oluşturulamadı: ' + reason.slice(0, 200);
-  if (!hits.length) {
-    bot.text = note;
-    bot.html = esc(note) + '<br><a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de aç</a>';
-    return;
+  } catch (e) {
+    const gLink = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(imageTopic(q));
+    bot.text = 'Görsel oluşturulamadı: ' + e.message;
+    bot.html = esc(bot.text) + '<br><a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de aç</a>';
   }
-  bot.text = 'Benzer görseller: ' + query;
-  bot.html = esc(note) + '<br>Bunun yerine benzer fotoğraflar:<div class="gallery">' +
-    hits.map(h => `<a href="${esc(h.link)}" target="_blank" rel="noopener"><img src="${esc(h.img)}" alt="${esc(h.alt)}" loading="lazy"></a>`).join('') +
-    '</div><div class="credit">Kaynak: Vikimedia Commons · <a href="' + esc(gLink) + '" target="_blank" rel="noopener">Google Görseller\'de daha fazla</a></div>';
 }
 
 /* ---------- Soru cevap ---------- */
@@ -346,15 +275,8 @@ $('#newChat').onclick = newChat;
 $('#delCur').onclick = () => currentId && deleteChat(currentId);
 $('#search').oninput = renderList;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
-$('#settingsBtn').onclick = () => {
-  $('#aiKey').value = cfg.aiKey || ''; $('#key').value = cfg.key || ''; $('#cx').value = cfg.cx || '';
-  $('#dlg').showModal();
-};
-$('#save').onclick = () => {
-  cfg = { ...cfg, aiKey: $('#aiKey').value.trim(), key: $('#key').value.trim(), cx: $('#cx').value.trim() };
-  store.set('camai.cfg', { aiKey: cfg.aiKey, key: cfg.key, cx: cfg.cx });
-};
+$('#settingsBtn').onclick = () => $('#dlg').showModal();
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v9';
+document.title = 'Cam AI v10';
