@@ -4,7 +4,10 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 };
 
+// ---- API anahtarları ----
+const POLLI_KEY = 'sk_1AH6sokVXaGH9P4nwqM3QA7PVaP54TG7';
 let GEMINI_KEY = store.get('camai.geminiKey', '') || 'AQ.Ab8RN6KJ-SsdwBgm-6vaa_rvowi9RWsxLKOHOIHyGzxIu9eyNg';
+
 let chats = store.get('camai.chats', []);
 let currentId = null;
 
@@ -13,6 +16,7 @@ const save = () => store.set('camai.chats', chats);
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const current = () => chats.find(c => c.id === currentId);
 const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Sohbet yönetimi ---------- */
 function newChat() {
@@ -48,7 +52,7 @@ function renderMsgs() {
   $('#title').textContent = c ? c.title : 'Cam AI';
   $('#delCur').style.visibility = c ? 'visible' : 'hidden';
   if (!c || !c.msgs.length) {
-    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz.</div>';
+    box.innerHTML = '<div class="hello"><b>Merhaba!</b>Benimle sohbet edebilirsin. Bir konuyu Vikipedi\'den araştırmamı istersen mesajına "araştır" yaz. Resim için "siyah pitbull resmi oluştur" yazabilirsin.</div>';
     return;
   }
   box.innerHTML = '';
@@ -76,7 +80,7 @@ async function wikiSearch(q) {
     .filter(p => p.text.length > 40);
 }
 
-/* ---------- Yapay zeka: Gemini ---------- */
+/* ---------- Yapay zeka (sohbet): önce Gemini, olmazsa Pollinations ---------- */
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
 function toGemini(messages) {
@@ -92,10 +96,9 @@ function toGemini(messages) {
   return { systemInstruction: sys ? { parts: [{ text: sys }] } : undefined, contents };
 }
 
-async function callAI(messages) {
-  if (!GEMINI_KEY) throw new Error('Önce sol alttaki Ayarlar bölümüne Gemini API anahtarını gir.');
+async function callGemini(messages) {
   let lastErr = '';
-  for (const model of ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.1-flash']) {
+  for (const model of ['gemini-flash-latest', 'gemini-2.5-flash']) {
     try {
       const r = await fetch(GEMINI + model + ':generateContent', {
         method: 'POST',
@@ -104,17 +107,50 @@ async function callAI(messages) {
       });
       const raw = await r.text();
       if (!r.ok) {
-        lastErr = `${model} (${r.status}) ${raw.slice(0, 200)}`;
+        lastErr = `Gemini ${model} (${r.status}) ${raw.slice(0, 150)}`;
         if ([401, 403, 429].includes(r.status)) break;
         continue;
       }
       const d = JSON.parse(raw);
       const out = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
       if (out) return out;
-      lastErr = `${model} boş cevap verdi (${d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || 'sebep belirtilmedi'}).`;
+      lastErr = `Gemini ${model} boş cevap verdi.`;
     } catch (e) { lastErr = e.message; }
   }
-  throw new Error('Yapay zeka cevap veremedi. ' + lastErr);
+  throw new Error(lastErr);
+}
+
+async function callPollinations(messages) {
+  let lastErr = '';
+  for (const model of ['openai', 'gemini', 'openai-fast']) {
+    try {
+      const r = await fetch('https://gen.pollinations.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + POLLI_KEY },
+        body: JSON.stringify({ model, messages })
+      });
+      const raw = await r.text();
+      if (!r.ok) {
+        lastErr = `Pollinations ${model} (${r.status}) ${raw.slice(0, 150)}`;
+        if ([401, 402, 403, 429].includes(r.status)) break;
+        continue;
+      }
+      const c = JSON.parse(raw).choices?.[0]?.message?.content;
+      const out = (typeof c === 'string' ? c : Array.isArray(c) ? c.map(p => p.text || '').join('') : '').trim();
+      if (out) return out;
+      lastErr = `Pollinations ${model} boş cevap verdi.`;
+    } catch (e) { lastErr = e.message; }
+  }
+  throw new Error(lastErr);
+}
+
+async function callAI(messages) {
+  let err1 = '';
+  if (GEMINI_KEY) {
+    try { return await callGemini(messages); } catch (e) { err1 = e.message + ' | '; }
+  }
+  try { return await callPollinations(messages); }
+  catch (e) { throw new Error('Yapay zeka cevap veremedi. ' + err1 + e.message); }
 }
 
 /* ---------- Mesaj türünü belirleme ---------- */
@@ -134,23 +170,128 @@ function topicOf(q) {
     .replace(/\s+/g, ' ').trim();
   return t || q;
 }
+function imageTopic(q) {
+  const t = q
+    .replace(/^\/resim/i, ' ')
+    .replace(/\S*(resim|resm|fotoğraf|fotograf|görsel|gorsel|oluştur|olustur|göster|çiz|üret|hazırla|yap|bul|ver|istiyorum|olsun|getir)\S*/gi, ' ')
+    .replace(/(^|\s)(bana|lütfen|bir|bi|şu|bu|için|kafana|göre)(?=\s|$)/gi, ' ')
+    .replace(/[?!.,]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return t || q;
+}
+
+/* ---------- Resim üretimi: Pollinations (yedek: AI Horde) ---------- */
+async function englishPrompt(q) {
+  let prompt = imageTopic(q);
+  try {
+    const en = await callAI([
+      { role: 'system', content: 'Kullanıcının istediği resim için kısa ve ayrıntılı bir İngilizce görsel üretim promptu yaz (en fazla 40 kelime). Sadece promptu yaz, başka hiçbir şey yazma.' },
+      { role: 'user', content: q }
+    ]);
+    const clean = en.replace(/["\n]/g, ' ').trim();
+    if (clean && clean.length < 400 && !/[{}]/.test(clean)) prompt = clean;
+  } catch (e) { console.warn(e); }
+  return prompt;
+}
+
+async function shrinkBlob(blob) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bmp.width * s);
+  cv.height = Math.round(bmp.height * s);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/jpeg', 0.82);
+}
+
+async function pollinationsImage(prompt) {
+  let lastErr = '';
+  for (const model of ['flux', 'turbo', 'gptimage']) {
+    const base = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) +
+      '?model=' + model + '&width=1024&height=1024&seed=' + Math.floor(Math.random() * 1e6);
+    let r;
+    try {
+      r = await fetch(base, { headers: { Authorization: 'Bearer ' + POLLI_KEY } });
+    } catch (e) {
+      return base + '&key=' + encodeURIComponent(POLLI_KEY);
+    }
+    if (!r.ok) {
+      const t = await r.text();
+      lastErr = `Pollinations ${model} (${r.status}) ${t.slice(0, 160)}`;
+      if ([401, 402, 403].includes(r.status)) break;
+      continue;
+    }
+    if (!(r.headers.get('content-type') || '').startsWith('image/')) {
+      lastErr = `Pollinations ${model} görsel yerine başka cevap verdi.`;
+      continue;
+    }
+    return await shrinkBlob(await r.blob());
+  }
+  throw new Error(lastErr || 'Pollinations resim üretemedi.');
+}
+
+const HORDE = 'https://aihorde.net/api/v2';
+const HORDE_AGENT = 'camai:1.0:ogrenci-projesi';
+
+async function hordeImage(prompt, onProgress) {
+  const r = await fetch(HORDE + '/generate/async', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: '0000000000', 'Client-Agent': HORDE_AGENT },
+    body: JSON.stringify({
+      prompt: prompt + ' ### blurry, deformed, low quality, text, watermark',
+      params: { width: 512, height: 512, steps: 25, n: 1 },
+      nsfw: false, censor_nsfw: true, r2: true
+    })
+  });
+  const sub = await r.json().catch(() => ({}));
+  if (!r.ok || !sub.id) throw new Error(`AI Horde reddetti (${r.status}). ${sub.message || ''}`.trim());
+
+  const started = Date.now();
+  while (Date.now() - started < 8 * 60 * 1000) {
+    await sleep(3000);
+    const c = await (await fetch(HORDE + '/generate/check/' + sub.id, { headers: { 'Client-Agent': HORDE_AGENT } })).json().catch(() => ({}));
+    if (c.faulted) throw new Error('AI Horde üretimi başarısız oldu.');
+    if (c.done) break;
+    onProgress(`Resim hazırlanıyor (sıra: ${c.queue_position ?? '?'}, tahmini ${c.wait_time ?? '?'} sn)…`);
+  }
+  const st = await (await fetch(HORDE + '/generate/status/' + sub.id, { headers: { 'Client-Agent': HORDE_AGENT } })).json().catch(() => ({}));
+  const g = st.generations?.[0];
+  if (!g || !g.img) throw new Error('Resim zamanında hazırlanamadı.');
+  if (g.censored) throw new Error('İstek filtreye takıldı.');
+  return /^https?:/i.test(g.img) ? g.img : 'data:image/webp;base64,' + g.img;
+}
+
+async function showImages(q, bot, progress) {
+  const prompt = await englishPrompt(q);
+  let src = '', errs = [];
+  try { src = await pollinationsImage(prompt); }
+  catch (e) {
+    errs.push(e.message);
+    try { progress('Pollinations olmadı, ücretsiz servis deneniyor…'); src = await hordeImage(prompt, progress); }
+    catch (e2) { errs.push(e2.message); }
+  }
+  if (src) {
+    bot.text = 'Görsel: ' + q;
+    bot.html = 'İşte görselin:<img src="' + esc(src) + '" alt="' + esc(q) + '" onload="this.closest(\'#msgs\').scrollTop=1e9">';
+  } else {
+    bot.text = 'Görsel oluşturulamadı: ' + errs.join(' | ');
+    bot.html = esc(bot.text);
+  }
+}
 
 /* ---------- Soru cevap ---------- */
-const NO_IMAGE = 'Şu an resim oluşturamıyorum ama sorularını cevaplayabilir ve konuları Vikipedi\'den araştırabilirim.';
-
 const BASE_RULES =
   'Sen Cam AI adlı bir yapay zeka asistansın. Seni Zikrullah yaptı. ' +
   'Sana "seni kim yaptı", "kim geliştirdi" ya da "sen kimsin" diye sorulursa şöyle cevap ver: "Ben Cam AI\'yim, beni Zikrullah yaptı." Arka plandaki dil modelinin, Google\'ın, OpenAI\'ın ya da başka bir şirketin adını asla söyleme. ' +
   'Türkçe, doğal, samimi ve kısa cevap ver. ' +
   'Kullanıcı selam verirse sadece selam verip nasıl yardımcı olabileceğini sor. ' +
   'Kullanıcının kelimelerinin olası farklı anlamlarını sıralama, örnek verme, sorulmayan bilgi ekleme ve "istersen şunu da yapabilirim" gibi teklifler sunma. ' +
-  'Resim oluşturamazsın, resim oluşturduğunu veya oluşturacağını asla söyleme. ' +
   'Asla JSON, kod bloğu ya da araç çağrısı yazma. Sadece düz Türkçe metinle cevap ver.';
 
 async function ask(q) {
   const c = current() || (newChat(), current());
   if (c.title === 'Yeni sohbet') c.title = q.slice(0, 40);
-  const history = c.msgs.filter(m => !m.pending && !m.text.startsWith('Hata:') && m.text !== NO_IMAGE).slice(-8)
+  const history = c.msgs.filter(m => !m.pending && !m.html?.includes('<img') && !m.text.startsWith('Hata:') && !m.text.startsWith('Görsel')).slice(-8)
     .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   c.msgs.push({ role: 'user', text: q });
 
@@ -159,43 +300,50 @@ async function ask(q) {
     save(); render();
     return;
   }
-  if (wantsImage(q)) {
-    c.msgs.push({ role: 'ai', text: NO_IMAGE });
-    save(); render();
-    return;
-  }
 
   const bot = { role: 'ai', text: 'Düşünüyorum…', pending: true };
   c.msgs.push(bot); save(); render();
+  const progress = t => { bot.text = t; renderMsgs(); };
 
   try {
-    let sources = [], searched = false;
-    if (isSearch(q) && $('#web').checked) {
-      searched = true;
-      const topic = topicOf(q);
-      bot.text = `Vikipedi'de "${topic}" aranıyor…`; renderMsgs();
-      try { sources = await wikiSearch(topic); } catch (e) { console.warn(e); }
-    }
-    const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
-    let system = BASE_RULES;
-    if (ctx) {
-      system += ' Kullanıcı bir konuyu araştırmanı istedi. Aşağıdaki Vikipedi kaynaklarını kullanarak konuyu en yaygın anlamıyla kısaca özetle. Kullandığın bilgiye [1], [2] gibi numara koy. Kaynak soruyla ilgili değilse onu kullanma.\n\nVikipedi kaynakları:\n' + ctx;
-    } else if (searched) {
-      system += ' Kullanıcı bir konuyu araştırmanı istedi ama Vikipedi\'de sonuç bulunamadı. Bunu kısaca söyle ve kendi bilginle kısa bir cevap ver.';
-    }
-    bot.text = 'Cevap yazılıyor…'; renderMsgs();
-    let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
+    if (wantsImage(q)) {
+      progress('Resim isteği gönderiliyor…');
+      await showImages(q, bot, progress);
+    } else {
+      let sources = [], searched = false;
+      if (isSearch(q) && $('#web').checked) {
+        searched = true;
+        const topic = topicOf(q);
+        progress(`Vikipedi'de "${topic}" aranıyor…`);
+        try { sources = await wikiSearch(topic); } catch (e) { console.warn(e); }
+      }
+      const ctx = sources.map((s, i) => `[${i + 1}] ${s.title}: ${s.text}`).join('\n\n');
+      let system = BASE_RULES;
+      if (ctx) {
+        system += ' Kullanıcı bir konuyu araştırmanı istedi. Aşağıdaki Vikipedi kaynaklarını kullanarak konuyu en yaygın anlamıyla kısaca özetle. Kullandığın bilgiye [1], [2] gibi numara koy. Kaynak soruyla ilgili değilse onu kullanma.\n\nVikipedi kaynakları:\n' + ctx;
+      } else if (searched) {
+        system += ' Kullanıcı bir konuyu araştırmanı istedi ama Vikipedi\'de sonuç bulunamadı. Bunu kısaca söyle ve kendi bilginle kısa bir cevap ver.';
+      }
+      progress('Cevap yazılıyor…');
+      let answer = await callAI([{ role: 'system', content: system }, ...history, { role: 'user', content: q }]);
 
-    if (/text-to-image|"prompt"\s*:/i.test(answer)) answer = NO_IMAGE;
-    if (!/open\s?ai|chat\s?gpt|gemini|google|gpt/i.test(q)) {
-      answer = answer.replace(/open\s?ai|chat\s?gpt|gemini/gi, 'Zikrullah');
+      if (/text-to-image|"prompt"\s*:/i.test(answer)) {
+        progress('Resim isteği gönderiliyor…');
+        await showImages(q, bot, progress);
+        delete bot.pending; save(); render();
+        return;
+      }
+
+      if (!/open\s?ai|chat\s?gpt|gemini|google|pollinations|gpt/i.test(q)) {
+        answer = answer.replace(/open\s?ai|chat\s?gpt|gemini|pollinations/gi, 'Zikrullah');
+      }
+      const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
+        .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
+      bot.text = answer;
+      bot.html = fmt(answer) + (used.length
+        ? '<h3>Kaynaklar (Vikipedi)</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
+        : '');
     }
-    const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
-      .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
-    bot.text = answer;
-    bot.html = fmt(answer) + (used.length
-      ? '<h3>Kaynaklar (Vikipedi)</h3>' + used.map(n => `<div class="src">[${n}] <a href="${esc(sources[n - 1].link)}" target="_blank" rel="noopener">${esc(sources[n - 1].title)}</a></div>`).join('')
-      : '');
   } catch (e) {
     bot.text = 'Hata: ' + e.message;
     delete bot.html;
@@ -214,12 +362,13 @@ $('#newChat').onclick = newChat;
 $('#delCur').onclick = () => currentId && deleteChat(currentId);
 $('#search').oninput = renderList;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
-$('#settingsBtn').onclick = () => { $('#aiKey').value = GEMINI_KEY; $('#dlg').showModal(); };
+$('#settingsBtn').onclick = () => { $('#aiKey').value = store.get('camai.geminiKey', ''); $('#dlg').showModal(); };
 $('#save').onclick = () => {
-  GEMINI_KEY = $('#aiKey').value.trim();
-  store.set('camai.geminiKey', GEMINI_KEY);
+  const v = $('#aiKey').value.trim();
+  store.set('camai.geminiKey', v);
+  if (v) GEMINI_KEY = v;
 };
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v12';
+document.title = 'Cam AI v14';
