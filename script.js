@@ -5,7 +5,7 @@ const store = {
 };
 
 // ---- API anahtarları ----
-const POLLI_KEY = 'sk_1AH6sokVXaGH9P4nwqM3QA7PVaP54TG7';
+const POLLI_KEY = '';
 let GEMINI_KEY = store.get('camai.geminiKey', '') || 'AQ.Ab8RN6L3x08X3jiAfx04yLfSu08RTCH-fMXIrQySDf1dI2VfpQ';
 
 let chats = store.get('camai.chats', []);
