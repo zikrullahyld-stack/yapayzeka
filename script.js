@@ -18,6 +18,9 @@ const current = () => chats.find(c => c.id === currentId);
 const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Servisin hata mesajını cevap sanmamak için
+const isServiceError = t => /API key|enough credits|isn't allowed|isn’t allowed|top[- ]?up|whoever runs|grant\?id|insufficient|quota/i.test(t);
+
 /* ---------- Sohbet yönetimi ---------- */
 function newChat() {
   const c = { id: uid(), title: 'Yeni sohbet', msgs: [] };
@@ -137,6 +140,10 @@ async function callPollinations(messages) {
       }
       const c = JSON.parse(raw).choices?.[0]?.message?.content;
       const out = (typeof c === 'string' ? c : Array.isArray(c) ? c.map(p => p.text || '').join('') : '').trim();
+      if (out && isServiceError(out)) {
+        lastErr = `Pollinations ${model}: ${out.slice(0, 220)}`;
+        continue;
+      }
       if (out) return out;
       lastErr = `Pollinations ${model} boş cevap verdi.`;
     } catch (e) { lastErr = e.message; }
@@ -189,7 +196,7 @@ async function englishPrompt(q) {
       { role: 'user', content: q }
     ]);
     const clean = en.replace(/["\n]/g, ' ').trim();
-    if (clean && clean.length < 400 && !/[{}]/.test(clean)) prompt = clean;
+    if (clean && clean.length < 400 && !/[{}]/.test(clean) && !isServiceError(clean)) prompt = clean;
   } catch (e) { console.warn(e); }
   return prompt;
 }
@@ -334,8 +341,9 @@ async function ask(q) {
         return;
       }
 
-      if (!/open\s?ai|chat\s?gpt|gemini|google|pollinations|gpt/i.test(q)) {
-        answer = answer.replace(/open\s?ai|chat\s?gpt|gemini|pollinations/gi, 'Zikrullah');
+      // Kimlik kuralı: sadece normal cevaplarda, sadece bu kelimeler
+      if (!/open\s?ai|chat\s?gpt|gemini|google|gpt/i.test(q)) {
+        answer = answer.replace(/open\s?ai|chat\s?gpt|gemini/gi, 'Zikrullah');
       }
       const used = [...new Set([...answer.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))]
         .filter(n => n >= 1 && n <= sources.length).sort((a, b) => a - b);
@@ -371,4 +379,4 @@ $('#save').onclick = () => {
 
 currentId = chats[0]?.id ?? null;
 render();
-document.title = 'Cam AI v14';
+document.title = 'Cam AI v15';
